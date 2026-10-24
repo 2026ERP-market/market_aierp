@@ -14,6 +14,76 @@ const { resolvePlanningAction } = require('../src/features/agent/navigation.ts')
 const { createApiServices } = require('../src/services/api/services.ts');
 const { orderQuantity } = require('../src/services/recommendationDecisions.ts');
 const apiFixtures = require('./api-fixtures.cjs');
+const { createAutomationService } = require('../src/services/automation.ts');
+
+test('자동 발주는 기본 OFF이며 ON 이후 승인 없이 샘플 발주하고 재고를 증가시키지 않는다', async () => {
+  const services = createMockServices();
+  const auto = createAutomationService(true, services.replenishment, services.decisions);
+  assert.equal(auto.getSnapshot().enabled, false);
+  await assert.rejects(auto.runDemo(), { code: 'validation' });
+  const stock = (await services.products.get('milk')).quantity;
+  let notices = 0; const unsubscribe = auto.subscribe(() => { notices++ });
+  await auto.setEnabled(true);
+  const result = auto.getSnapshot();
+  assert.equal(result.results.filter(r => r.status === 'ordered').length, 2);
+  assert.equal(result.running, false); assert.ok(notices > 0);
+  assert.equal((await services.products.get('milk')).quantity, stock);
+  assert.equal((await services.replenishment.get()).recommendations.find(r => r.id === 'rec-milk').finalQuantity, 30);
+  const count = (await services.purchases.list()).length;
+  await auto.runDemo(); assert.equal(auto.getSnapshot().results.length, 0);
+  assert.equal((await services.purchases.list()).length, count);
+  await auto.setEnabled(false); assert.equal(auto.getSnapshot().enabled, false);
+  assert.equal((await services.purchases.list()).length, count);
+  unsubscribe(); assert.equal(createAutomationService(true, services.replenishment, services.decisions).getSnapshot().enabled, false);
+});
+
+test('자동 발주 OFF는 진행 중인 한 요청을 취소하지 않고 다음 추천을 막는다', async () => {
+  const service = createMockServices();
+  let release, started; const begun = new Promise(r => { started = r });
+  const requests = [];
+  const auto = createAutomationService(true, service.replenishment, {
+    capabilities: { placeOrder: true, reject: true }, reject: service.decisions.reject,
+    async placeOrder(input) { requests.push(input); started(); await new Promise(r => { release = r }); return service.decisions.placeOrder(input) },
+  });
+  const execution = auto.setEnabled(true); await begun;
+  await assert.rejects(auto.runDemo(), { code: 'conflict' });
+  await auto.setEnabled(false); release(); await execution;
+  assert.equal(requests.length, 1); assert.equal(auto.getSnapshot().enabled, false);
+  assert.equal(auto.getSnapshot().results[0].status, 'ordered');
+  assert.equal((await service.replenishment.get()).recommendations.find(r => r.id === 'rec-bread').status, 'pending');
+});
+
+test('자동 발주 오류는 숨기지 않으며 재시도하고 거절한 추천은 실행하지 않는다', async () => {
+  const service = createMockServices();
+  await service.decisions.reject({ recommendationId: 'rec-milk', productId: 'milk' });
+  const auto = createAutomationService(true, service.replenishment, service.decisions);
+  service.setScenario('network'); await assert.rejects(auto.setEnabled(true), { code: 'network' });
+  assert.ok(auto.getSnapshot().error); assert.equal(auto.getSnapshot().running, false);
+  service.setScenario('normal'); await auto.runDemo();
+  assert.equal(auto.getSnapshot().results.length, 1);
+  assert.equal(auto.getSnapshot().results[0].recommendationId, 'rec-bread');
+});
+
+test('자동 발주는 불완전한 추천을 제외하고 개별 발주 실패를 결과에 남긴다', async () => {
+  const service = createMockServices(); const plan = await service.replenishment.get();
+  plan.recommendations[0].unitCost = null;
+  const auto = createAutomationService(true, { ...service.replenishment, get: async () => plan }, {
+    ...service.decisions, placeOrder: async () => { throw new Error('발주 처리 실패') },
+  });
+  await auto.setEnabled(true);
+  assert.deepEqual(auto.getSnapshot().results.map(r => r.status), ['skipped', 'failed']);
+  assert.equal(auto.getSnapshot().results[1].message, '발주 처리 실패');
+});
+
+test('실제 API 자동화는 미연동 상태이며 Mock이나 기존 일괄 발행을 호출하지 않는다', async () => {
+  let requests = 0;
+  const auto = createAutomationService(false, { get: async () => { requests++; throw Error('must not call') } }, { placeOrder: async () => { requests++; throw Error('must not call') } });
+  assert.equal(auto.getSnapshot().enabled, null); assert.equal(auto.getSnapshot().available, false);
+  await assert.rejects(auto.setEnabled(true), { code: 'contract_pending' });
+  await assert.rejects(auto.setEnabled(false), { code: 'contract_pending' });
+  await assert.rejects(auto.runDemo(), { code: 'contract_pending' });
+  assert.equal(requests, 0); assert.equal(auto.getSnapshot().enabled, null);
+});
 
 test('보충 계획은 동일한 고정 샘플이며 입고 예정과 과잉 위험을 별도로 제공한다', async () => {
   const first = await createMockServices().replenishment.get();

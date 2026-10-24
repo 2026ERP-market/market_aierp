@@ -8,6 +8,7 @@ import { isMock } from '../../services';
 import { ResourceState } from '../common/ui';
 import { PosCatalog } from './PosCatalog';
 import { PosOrderPanel } from './PosOrderPanel';
+import { AutomationControl } from './AutomationControl';
 import { c } from './counterStyles';
 
 interface Props {
@@ -35,7 +36,7 @@ export function PosWorkspace({ data, loading, error, onRefresh, onOpenOverview }
   return <SafeAreaView edges={['top', 'left', 'right']} style={c.root}>
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
       <View style={[c.bar, !wide && c.barMobile]}>
-        <View style={c.barLeft}><Pressable accessibilityRole="button" accessibilityLabel="업무 메뉴 열기" onPress={() => setDrawer(true)} style={c.iconButton}><Text style={c.iconText}>☰</Text></Pressable><View style={c.pill}><Text style={c.pillText}>{isMock ? '샘플 ON' : 'API 모드'}</Text><View style={c.pillDot} /></View></View>
+        <View style={c.barLeft}><Pressable accessibilityRole="button" accessibilityLabel="업무 메뉴 열기" onPress={() => setDrawer(true)} style={c.iconButton}><Text style={c.iconText}>☰</Text></Pressable><AutomationControl onChanged={onRefresh} /></View>
         {wide && navigation}
         <View style={[c.barRight, !wide && { marginLeft: 'auto' }]}>{wide && data && <Text style={c.time}>갱신 {new Date(data.plan.updatedAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' })}</Text>}<Pressable accessibilityRole="button" accessibilityLabel="발주 승인 대기 확인" onPress={() => router.push({ pathname: '/purchases', params: { view: 'approval' } })} style={c.iconButton}><View style={{ alignItems: 'center' }}><View style={{ width: 17, height: 19, borderTopLeftRadius: 9, borderTopRightRadius: 9, backgroundColor: '#D9E0E5' }} /><View style={{ width: 23, height: 3, borderRadius: 2, backgroundColor: '#D9E0E5' }} /><View style={{ width: 5, height: 3, marginTop: 2, borderRadius: 2, backgroundColor: '#D9E0E5' }} /></View></Pressable><Pressable accessibilityRole="button" accessibilityLabel="설정 열기" onPress={() => router.push('/settings')} style={c.iconButton}><Text style={c.iconText}>⋮</Text></Pressable></View>
         {!wide && navigation}
@@ -44,7 +45,7 @@ export function PosWorkspace({ data, loading, error, onRefresh, onOpenOverview }
       {(loading || error) && <View style={{ padding: 12 }}><ResourceState loading={loading} error={error} hasData={!!data} retry={onRefresh} /></View>}
       {!wide && <View style={c.mobileSwitch}>{[{ label: '상품 선택', value: false }, { label: '발주 패널', value: true }].map(tab => <Pressable key={tab.label} accessibilityRole="tab" accessibilityState={{ selected: mobilePanel === tab.value }} onPress={() => setMobilePanel(tab.value)} style={[c.mobileSwitchButton, mobilePanel === tab.value && c.mobileSwitchActive]}><Text style={c.mobileSwitchText}>{tab.label}</Text></Pressable>)}</View>}
       <View style={c.body}>
-        {(wide || !mobilePanel) && <PosCatalog products={products} plan={data?.plan} selectedId={product?.id} width={wide ? width - panelWidth : width} onSelect={id => { setSelectedId(id); if (!wide) setMobilePanel(true) }} onRefresh={onRefresh} onOpenOverview={openOverview} />}
+        {(wide || !mobilePanel) && <PosCatalog products={products} plan={data?.plan} selectedId={product?.id} width={wide ? width - panelWidth : width} compact={!wide} onSelect={id => { setSelectedId(id); if (!wide) setMobilePanel(true) }} onRefresh={onRefresh} onOpenOverview={openOverview} />}
         {(wide || mobilePanel) && <View style={[c.panel, { width: panelWidth, flex: wide ? undefined : 1 }]}><PosOrderPanel product={product} order={order} recommendation={recommendation} loading={loading} onChanged={onRefresh} onClear={clear} /></View>}
       </View>
       <Modal visible={drawer} transparent animationType="fade" onRequestClose={() => setDrawer(false)}><View style={c.backdrop}><SafeAreaView style={c.drawer}><ScrollView><Text style={c.drawerTitle}>매장 업무</Text>{[

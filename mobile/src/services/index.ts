@@ -1,5 +1,6 @@
 import { createMockServices } from './mock';
 import { createApiServices } from './api/services';
+import { createAutomationService } from './automation';
 export const dataSource = process.env.EXPO_PUBLIC_DATA_SOURCE ?? 'mock';
 export const isMock = dataSource === 'mock';
 export const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
@@ -9,3 +10,4 @@ const live = createApiServices({ baseUrl: apiBaseUrl, warehouseId });
 export const services = isMock ? mockServices : live.services;
 export const replenishmentService = isMock ? mockServices.replenishment : live.replenishment;
 export const recommendationDecisions = isMock ? mockServices.decisions : live.decisions;
+export const automationService = createAutomationService(isMock, replenishmentService, recommendationDecisions);
