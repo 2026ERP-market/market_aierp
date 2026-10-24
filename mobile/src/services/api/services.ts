@@ -228,6 +228,7 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
             ? 'failed'
             : 'skipped';
         return {
+          runId: decode.string(row.run_id),
           recommendationId: decode.string(row.recommendation_id) || decode.string(row.run_id),
           productName: decode.string(row.product_name) || decode.string(row.item_name) || '품목',
           quantity: decode.numeric(row.final_qty),

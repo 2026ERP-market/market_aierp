@@ -3,6 +3,7 @@ import type { RecommendationDecisionService } from './recommendationDecisions';
 import { errorMessage, ServiceError } from './errors';
 
 export interface AutomationResult {
+  runId?: string;
   recommendationId: string; productName: string; quantity: number;
   status: 'ordered' | 'skipped' | 'failed'; message: string; orderId?: string;
 }
