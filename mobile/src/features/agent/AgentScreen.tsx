@@ -38,7 +38,7 @@ export default function AgentScreen() {
     if (ok && id) router.push({ pathname: '/purchase-orders/[id]', params: { id } });
   }
   return <Screen title="AI 발주 도우미" subtitle="품절 위험과 적정 보충 수량을 함께 검토하세요.">
-    <Notice>AI 추천은 검토를 돕는 정보입니다. 주문이나 재고를 자동으로 변경하지 않아요. 데모에서는 정해진 예시 답변만 제공합니다.</Notice>
+    <Notice>AI 추천은 검토를 돕는 정보입니다. 주문이나 재고를 자동으로 변경하지 않아요.</Notice>
     <Card title="이렇게 물어보세요">{['재고가 부족해질 상품을 알려줘', '우유 발주 수량을 추천해 줘', '과잉재고 위험을 설명해 줘', '식빵 발주서 초안을 만들어 줘'].map(question => <Button key={question} title={question} secondary disabled={action.busy || !!retry} onPress={() => send(question)} />)}</Card>
     {messages.map(message => <View key={message.id} style={[ui.card, { alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', width: '95%', backgroundColor: message.role === 'user' ? colors.primarySoft : colors.surface }]}><Text style={[ui.muted, { fontWeight: '700' }]}>{message.role === 'user' ? '나' : '✦ AI 도우미'}{message.state !== 'success' ? ' · 추가 확인 필요' : ''}</Text><Text selectable style={ui.body}>{message.content}</Text>{message.cards?.map((card, index) => <Card key={index} title={card.title}><Text style={ui.body}>{card.text}</Text><Button title={card.action.label} secondary disabled={action.busy || !resolvePlanningAction(card.action)} onPress={() => openAction(card.action)} /></Card>)}</View>)}
     {action.busy && <Notice>응답을 기다리고 있어요…</Notice>}
