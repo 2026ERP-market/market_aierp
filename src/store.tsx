@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import type { PlacedOrder, Product, Supplier } from './types';
+import { createContext, useCallback, useContext, useMemo, useState, useEffect, type ReactNode } from 'react';
+import type { PlacedOrder, Product, Supplier, Category } from './types';
 import { initialProducts, suppliers } from './data/mock';
 import { addDays, daysUntil, startOfToday, toISO } from './lib/date';
 import { analyze, type Analysis } from './lib/recommend';
@@ -35,6 +35,7 @@ interface Store {
   lots: ExpiryLot[];
   orders: PlacedOrder[];
   discounted: Set<string>;
+  isLiveApi: boolean;
   setPacks: (productId: string, packs: number) => void;
   toggleRec: (productId: string) => void;
   toggleDiscount: (batchId: string) => void;
@@ -43,17 +44,65 @@ interface Store {
 
 const Ctx = createContext<Store | null>(null);
 
+const mapCategory = (cat: string): Category => {
+  if (cat.includes('채소') || cat.includes('과일') || cat.includes('신선')) return '채소·과일';
+  if (cat.includes('축산') || cat.includes('정육') || cat.includes('계란')) return '정육·계란';
+  if (cat.includes('유제품') || cat.includes('유가공')) return '유제품';
+  if (cat.includes('조미료') || cat.includes('장류')) return '조미료';
+  if (cat.includes('과자') || cat.includes('스낵')) return '과자';
+  if (cat.includes('음료') || cat.includes('생수')) return '음료';
+  return '가공식품';
+};
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [today] = useState(startOfToday);
-  const [products, setProducts] = useState(initialProducts);
+  const [products, setProducts] = useState<Product[]>(initialProducts);
   const [edits, setEdits] = useState<Record<string, Edit>>({});
   const [orders, setOrders] = useState<PlacedOrder[]>([]);
   const [discounted, setDiscounted] = useState<Set<string>>(new Set());
+  const [isLiveApi, setIsLiveApi] = useState(false);
 
   const supplierById = useMemo(() => Object.fromEntries(suppliers.map((s) => [s.id, s])), []);
 
+  // FastAPI 백엔드로부터 실시간 재고 및 상품 데이터 연동
+  useEffect(() => {
+    fetch('/api/v1/inventory/current')
+      .then((res) => {
+        if (!res.ok) throw new Error('API server offline');
+        return res.json();
+      })
+      .then((data) => {
+        if (data && Array.isArray(data.products) && data.products.length > 0) {
+          const liveProducts: Product[] = data.products.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            category: mapCategory(p.category),
+            unit: p.unit,
+            packSize: p.pack_size || 1,
+            batches: (p.batches || []).map((b: any) => ({
+              id: b.batch_id,
+              qty: b.qty,
+              expiry: b.expiry_date,
+            })),
+            incoming: p.incoming_qty > 0 ? [{ qty: p.incoming_qty, arrival: toISO(addDays(today, 2)) }] : [],
+            safetyStock: p.safety_stock,
+            costPrice: p.cost_price,
+            salePrice: p.price,
+            avgDailySales: p.safety_stock * 0.45,
+            supplierId: p.supplier_id || 's1',
+          }));
+          setProducts(liveProducts);
+          setIsLiveApi(true);
+        }
+      })
+      .catch(() => {
+        // 백엔드 미구동 시 mock 데이터 자동 유지
+        setIsLiveApi(false);
+      });
+  }, [today]);
+
   const analyses = useMemo(
-    () => products.map((p) => analyze(p, supplierById[p.supplierId], today)),
+    () => products.map((p) => analyze(p, supplierById[p.supplierId] || suppliers[0], today)),
     [products, supplierById, today],
   );
 
@@ -75,13 +124,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () =>
       products
         .flatMap((p) => {
-          // 기한이 빠른 로트부터 팔린다고 보고, 기한 안에 못 팔 것으로 예상되는 수량을 로트별로 계산
           let sold = 0;
           return p.batches
             .map((b) => ({ b, daysLeft: daysUntil(b.expiry, today) }))
             .sort((x, y) => x.daysLeft - y.daysLeft)
             .map(({ b, daysLeft }) => {
-              // 소비기한 당일까지 판매 가능 (이미 지난 것은 0일)
               const capacity = p.avgDailySales * (daysLeft >= 0 ? daysLeft + 1 : 0) - sold;
               const sellQty = Math.min(b.qty, Math.max(0, Math.floor(capacity)));
               sold += sellQty;
@@ -117,15 +164,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  /** 발주 확정: 입고 예정으로 반영하면 다음 추천 계산에서 자동으로 빠진다. (순환형 발주) */
   const placeOrders = useCallback(
     (supplierIds: string[]) => {
       const placed: PlacedOrder[] = supplierIds.map((sid, i) => {
+        const targetSupplier = supplierById[sid] || suppliers[0];
         const mine = recs.filter((r) => r.included && r.supplier.id === sid);
         return {
           id: `PO-${toISO(today).replaceAll('-', '')}-${orders.length + i + 1}`,
           supplierId: sid,
-          arrival: toISO(addDays(today, supplierById[sid].leadTimeDays)),
+          arrival: toISO(addDays(today, targetSupplier.leadTimeDays)),
           lines: mine.map((r) => ({
             productId: r.product.id,
             name: r.product.name,
@@ -163,6 +210,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     lots,
     orders,
     discounted,
+    isLiveApi,
     setPacks,
     toggleRec,
     toggleDiscount,
