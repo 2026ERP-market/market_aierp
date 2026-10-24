@@ -1,0 +1,10 @@
+import { createMockServices } from './mock';
+import { createApiServices } from './api/services';
+export const dataSource = process.env.EXPO_PUBLIC_DATA_SOURCE ?? 'mock';
+export const isMock = dataSource === 'mock';
+export const apiBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? '';
+export const warehouseId = process.env.EXPO_PUBLIC_WAREHOUSE_ID ?? 'WH-ASAN';
+export const mockServices = createMockServices();
+const live = createApiServices({ baseUrl: apiBaseUrl, warehouseId });
+export const services = isMock ? mockServices : live.services;
+export const replenishmentService = isMock ? mockServices.replenishment : live.replenishment;

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "매장 관리 ERP",
+    "slug": "market-aierp",
+    "version": "0.1.0",
+    "scheme": "marketaierp",
+    "orientation": "default",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-router"],
+    "web": { "bundler": "metro", "output": "single" }
+  }
+}
