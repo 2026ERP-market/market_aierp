@@ -1,4 +1,5 @@
 import type { AgentAction, PurchaseOrder } from '../types/domain';
+import type { RecommendationStatus } from './recommendationDecisions';
 
 // 신규 화면용 제안입니다. 기존 ERP/AI API 타입과 서비스 계약은 변경하지 않습니다.
 export interface InventoryPlanning {
@@ -24,6 +25,9 @@ export interface PurchaseRecommendation {
   reason: string;
   warning: string | null;
   draftId: string | null;
+  status?: RecommendationStatus;
+  orderId?: string | null;
+  finalQuantity?: number | null;
 }
 export interface ReplenishmentPlan {
   updatedAt: string;

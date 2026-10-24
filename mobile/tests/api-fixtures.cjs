@@ -1,6 +1,6 @@
 // Fixed HTTP response fixtures matching the checked-in FastAPI schemas, not a running backend.
 const inventory = { updated_at: '2026-10-24T01:30:00', products: [{ id: 'p10', name: '서버 우유', category: '유제품', unit: 'EA', price: 2900, cost_price: 2100, total_qty: 8, safety_stock: 20, status: 'low', supplier_name: '서버 공급사', incoming_qty: 30, batches: [{ batch_id: 'B-10', expiry_date: '2026-10-27', qty: 8 }] }] };
 const dashboard = { store_name: '서버 매장', date: '2026-10-24', revenue: 120000, change_percent: null, stockout_count: 1, expiring_count: 0, pending_order_count: 1, briefing: '서버 발주 브리핑', todos: [{ label: '발주 확인', target: 'purchases' }] };
-const recommendations = [{ rec_id: 'REC-10', item_id: 'p10', item_name: '서버 우유', supplier_name: '서버 공급사', current_stock: 8, forecast_demand: 32, recommended_qty: 24, lead_time_days: 2, reason: '서버 추천 근거' }];
+const recommendations = [{ rec_id: 'REC-10', item_id: 'p10', item_name: '서버 우유', supplier_id: 'SUP-1', supplier_name: '서버 공급사', warehouse_id: 'WH-ASAN', status: 'draft', current_stock: 8, forecast_demand: 32, recommended_qty: 24, lead_time_days: 2, reason: '서버 추천 근거' }];
 const orders = [{ po_id: 'PO-10', supplier_name: '서버 공급사', status: 'partial', created_at: '2026-10-24T01:30:00+00:00', received_date: null, total_amount: 50400, lines: [{ item_id: 'p10', item_name: '', order_qty: 24, received_qty: 8, unit_cost: 2100 }] }];
 module.exports = { inventory, dashboard, recommendations, orders };

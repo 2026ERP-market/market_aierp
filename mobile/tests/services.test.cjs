@@ -12,6 +12,7 @@ const { createHttpClient } = require('../src/services/api/client.ts');
 const { estimatedCost } = require('../src/utils/replenishment.ts');
 const { resolvePlanningAction } = require('../src/features/agent/navigation.ts');
 const { createApiServices } = require('../src/services/api/services.ts');
+const { orderQuantity } = require('../src/services/recommendationDecisions.ts');
 const apiFixtures = require('./api-fixtures.cjs');
 
 test('보충 계획은 동일한 고정 샘플이며 입고 예정과 과잉 위험을 별도로 제공한다', async () => {
@@ -178,10 +179,10 @@ test('API 모드의 주소 누락과 미지원 쓰기를 네트워크 호출 없
   try {
     const { services } = require('../src/services/index.ts');
     await assert.rejects(services.dashboard.get(), { code: 'validation' });
-    await assert.rejects(services.purchases.approve('x'), { code: 'contract_pending' });
+    await assert.rejects(services.purchases.approve('x'), { code: 'validation' });
     const { replenishmentService } = require('../src/services/index.ts');
     await assert.rejects(replenishmentService.get(), { code: 'validation' });
-    await assert.rejects(replenishmentService.createDraft('rec-milk'), { code: 'contract_pending' });
+    await assert.rejects(replenishmentService.createDraft('rec-milk'), { code: 'validation' });
   } finally { global.fetch = original; delete process.env.EXPO_PUBLIC_DATA_SOURCE }
 });
 
@@ -228,15 +229,12 @@ test('API 실패·잘못된 데이터·빈 배열을 Mock 데이터로 대체하
   } finally { global.fetch = original }
 });
 
-test('API 미지원 쓰기·타 매장 발주·잘못된 설정은 서버 요청 전에 차단한다', async () => {
+test('API 미지원 초안 저장·개별 발주·타 매장 발주·잘못된 설정은 요청 전에 차단한다', async () => {
   const original = global.fetch; global.fetch = async () => { throw new Error('요청되면 안 됩니다') };
   try {
     const api = createApiServices({ baseUrl: 'https://server.invalid' });
-    await assert.rejects(api.services.products.save({}), { code: 'contract_pending' });
-    await assert.rejects(api.services.inventory.count({}), { code: 'contract_pending' });
     await assert.rejects(api.services.purchases.save('PO-10', [10]), { code: 'contract_pending' });
-    await assert.rejects(api.services.purchases.approve('PO-10'), { code: 'contract_pending' });
-    await assert.rejects(api.replenishment.createDraft('REC-10'), { code: 'contract_pending' });
+    await assert.rejects(api.decisions.placeOrder({ recommendationId: 'REC-10', productId: 'p10', aiRecommendedQuantity: 24, quantity: 12 }), { code: 'contract_pending' });
     await assert.rejects(createApiServices({ baseUrl: 'https://server.invalid', warehouseId: 'OTHER' }).services.purchases.list(), { code: 'contract_pending' });
     for (const baseUrl of ['', 'http://YOUR_DEV_SERVER:8000', 'https://user:password@server.invalid', 'file:///tmp']) {
       await assert.rejects(createApiServices({ baseUrl }).services.products.list(), { code: 'validation' });
@@ -264,5 +262,117 @@ test('API 판매 기간을 정확히 매핑하고 미지원 과거 기간·서�
     const result = await api.services.sales.get({ start, end: today }); assert.equal(result.revenue, 1000); assert.equal(result.updatedAt, null);
     payload.start_date = today; await assert.rejects(api.services.sales.get({ start, end: today }), { code: 'invalid_response' });
     await assert.rejects(api.services.sales.get({ start: '2020-01-01', end: '2020-01-07' }), { code: 'contract_pending' });
+  } finally { global.fetch = original }
+});
+
+test('직접 발주는 AI 원본과 최종 수량을 구분하고 초안 이동 없이 내역에 반영한다', async () => {
+  const service = createMockServices(); const before = (await service.products.get('milk')).quantity;
+  const input = { recommendationId: 'rec-milk', productId: 'milk', aiRecommendedQuantity: 30, quantity: 12 };
+  const result = await service.decisions.placeOrder(input);
+  assert.equal(result.order.status, 'ordered'); assert.equal(result.aiRecommendedQuantity, 30); assert.equal(result.quantity, 12);
+  assert.equal(result.order.items[0].recommended, 30); assert.equal(result.order.items[0].quantity, 12); assert.equal(result.order.estimatedCost, 25200);
+  assert.equal((await service.products.get('milk')).quantity, before);
+  const plan = await service.replenishment.get(); const rec = plan.recommendations.find(r => r.id === 'rec-milk');
+  assert.equal(rec.status, 'ordered'); assert.equal(rec.quantity, 30); assert.equal(rec.finalQuantity, 12); assert.equal(rec.orderId, result.order.id);
+  assert.equal(plan.inventory.find(row => row.productId === 'milk').incomingQuantity, 12);
+  assert.equal((await service.purchases.get(result.order.id)).status, 'ordered');
+});
+
+test('직접 발주 중복·동시 요청과 거절 후 발주를 막는다', async () => {
+  const service = createMockServices(); const input = { recommendationId: 'rec-bread', productId: 'bread', aiRecommendedQuantity: 10, quantity: 7 };
+  const results = await Promise.allSettled([service.decisions.placeOrder(input), service.decisions.placeOrder(input)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  const first = results.find(r => r.status === 'fulfilled').value;
+  assert.equal((await service.decisions.placeOrder(input)).order.id, first.order.id);
+  assert.equal((await service.purchases.list()).length, 3);
+  await assert.rejects(service.decisions.placeOrder({ ...input, quantity: 9 }), { code: 'conflict' });
+  await assert.rejects(service.decisions.reject({ recommendationId: 'rec-bread', productId: 'bread' }), { code: 'conflict' });
+  await service.decisions.reject({ recommendationId: 'rec-milk', productId: 'milk' });
+  await assert.rejects(service.decisions.placeOrder({ recommendationId: 'rec-milk', productId: 'milk', aiRecommendedQuantity: 30, quantity: 10 }), { code: 'conflict' });
+});
+
+test('직접 발주 양의 정수와 추천/상품/원본 수량 검증 및 실패 재시도', async () => {
+  const service = createMockServices(); const input = { recommendationId: 'rec-milk', productId: 'milk', aiRecommendedQuantity: 30, quantity: 12 };
+  for (const value of ['', '0', '-1', '1.2', '1e2', 'Infinity', '9007199254740992']) assert.throws(() => orderQuantity(value), { code: 'validation' });
+  for (const quantity of [0, -1, 1.5, NaN, Infinity]) await assert.rejects(service.decisions.placeOrder({ ...input, quantity }), { code: 'validation' });
+  await assert.rejects(service.decisions.placeOrder({ ...input, productId: 'bread' }), { code: 'not_found' });
+  await assert.rejects(service.decisions.placeOrder({ ...input, aiRecommendedQuantity: 99 }), { code: 'conflict' });
+  service.setScenario('network'); await assert.rejects(service.decisions.placeOrder(input), { code: 'network' });
+  await assert.rejects(service.decisions.reject({ recommendationId: 'rec-milk', productId: 'milk' }), { code: 'network' });
+  service.setScenario('normal'); assert.equal((await service.replenishment.get()).recommendations[0].status, 'pending');
+  assert.equal((await service.purchases.get('DEMO-001')).status, 'draft');
+  assert.equal((await service.decisions.placeOrder(input)).order.status, 'ordered');
+});
+
+test('발주 안 함은 추천 상태만 바꾸고 기존 발주/재고를 삭제하지 않는다', async () => {
+  const service = createMockServices(); const before = await service.purchases.list();
+  await service.decisions.reject({ recommendationId: 'rec-milk', productId: 'milk' });
+  assert.equal((await service.replenishment.get()).recommendations[0].status, 'rejected');
+  assert.deepEqual(await service.purchases.list(), before);
+  assert.equal((await service.products.get('milk')).quantity, 8);
+});
+
+test('API 직접 발주는 기존 공급사 일괄 발행을 호출하지 않는다', async () => {
+  const original = global.fetch; let count = 0; global.fetch = async () => { count++; throw new Error('요청하면 안 됩니다') };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' });
+    assert.equal(api.decisions.capabilities.placeOrder, false);
+    await assert.rejects(api.decisions.placeOrder({ recommendationId: 'REC-10', productId: 'p10', aiRecommendedQuantity: 24, quantity: 12 }), { code: 'contract_pending' });
+    assert.equal(count, 0);
+  } finally { global.fetch = original }
+});
+
+test('API 거절은 ID·상품·매장·상태를 확인하고 기존 action API를 재사용한다', async () => {
+  const original = global.fetch; const calls = []; const rec = { rec_id: 'REC-10', item_id: 'p10', warehouse_id: 'WH-ASAN', status: 'draft' };
+  global.fetch = async (url, init) => {
+    calls.push({ url, init });
+    if (init.method === 'POST') { assert.deepEqual(JSON.parse(init.body), { action: 'reject' }); return Response.json({ status: 'success', rec_id: 'REC-10', new_status: 'rejected', qty: 24 }) }
+    return Response.json([rec]);
+  };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' });
+    await api.decisions.reject({ recommendationId: 'REC-10', productId: 'p10' });
+    assert.match(calls[1].url, /\/recommend\/REC-10\/action$/); assert.equal(calls[1].init.method, 'POST');
+    rec.status = 'ordered'; await assert.rejects(api.decisions.reject({ recommendationId: 'REC-10', productId: 'p10' }), { code: 'conflict' });
+    rec.status = 'draft'; rec.warehouse_id = 'OTHER'; await assert.rejects(api.decisions.reject({ recommendationId: 'REC-10', productId: 'p10' }), { code: 'forbidden' });
+    assert.equal(calls.filter(c => c.init.method === 'POST').length, 1);
+  } finally { global.fetch = original }
+});
+
+test('API 거절 실패·중복 요청은 성공으로 표시하지 않고 재시도를 허용한다', async () => {
+  const original = global.fetch; let fail = true; let posts = 0;
+  global.fetch = async (_url, init) => {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (init.method === 'POST') { posts++; return fail ? new Response('', { status: 500 }) : Response.json({ status: 'success', rec_id: 'REC-10', new_status: 'rejected' }) }
+    return Response.json([{ rec_id: 'REC-10', item_id: 'p10', warehouse_id: 'WH-ASAN', status: 'draft' }]);
+  };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' }); const input = { recommendationId: 'REC-10', productId: 'p10' };
+    const results = await Promise.allSettled([api.decisions.reject(input), api.decisions.reject(input)]);
+    assert.deepEqual(results.map(r => r.reason.code).sort(), ['conflict', 'server']); assert.equal(posts, 1);
+    fail = false; await api.decisions.reject(input); assert.equal(posts, 2);
+  } finally { global.fetch = original }
+});
+
+test('팀원의 상품 저장·실사·기존 발행·입고 API 연결을 유지한다', async () => {
+  const original = global.fetch; const calls = [];
+  const rec = { ...apiFixtures.recommendations[0], supplier_id: 'SUP-1', warehouse_id: 'WH-ASAN', status: 'draft' };
+  global.fetch = async (url, init) => {
+    calls.push({ url, init }); const pathname = new URL(url).pathname;
+    if (pathname.startsWith('/api/v1/items')) return Response.json({ item_id: 'p10', item_name: '서버 우유', category_l: '유제품', uom: 'EA', sale_price: 2900, cost_price: 2100, safety_stock: 20 });
+    if (pathname === '/api/v1/inventory/current') return Response.json(apiFixtures.inventory);
+    if (pathname === '/api/v1/purchases/recommend') return Response.json([rec]);
+    if (pathname === '/api/v1/purchases/orders') return Response.json(init.method === 'POST' ? apiFixtures.orders[0] : apiFixtures.orders);
+    return Response.json({ status: 'success' });
+  };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' });
+    assert.equal((await api.services.products.save({ name: '서버 우유', category: '유제품', unit: 'EA', price: 2900, barcode: '' }, 'p10')).id, 'p10');
+    await api.services.inventory.count({ productId: 'p10', counted: 9, reason: '실사' });
+    assert.equal((await api.replenishment.createDraft('REC-10')).id, 'PO-10');
+    assert.equal((await api.services.purchases.receive('PO-10', [{ receivedQty: 8, expiry: '2026-10-27' }])).id, 'PO-10');
+    assert.ok(calls.some(c => c.init.method === 'PUT' && c.url.endsWith('/items/p10')));
+    assert.ok(calls.some(c => c.url.endsWith('/inventory/adjust') && JSON.parse(c.init.body).adjusted_qty === 9));
+    assert.ok(calls.some(c => c.url.endsWith('/orders/PO-10/receive') && JSON.parse(c.init.body).received_items[0].received_qty === 8));
   } finally { global.fetch = original }
 });

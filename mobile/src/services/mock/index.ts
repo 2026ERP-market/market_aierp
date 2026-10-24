@@ -4,14 +4,16 @@ import { DEMO_DATE, DEMO_TIME, seedOrders, seedProducts } from './data';
 import type { ProductInput } from '../../types/domain';
 import type { ReplenishmentAction, ReplenishmentService } from '../replenishment';
 import { planningInventory, purchaseRecommendations } from './replenishment-data';
+import { validateDecision, type RecommendationDecisionService, type RecommendationOrderResult } from '../recommendationDecisions';
 export type MockScenario = 'normal' | 'empty' | 'network' | 'forbidden';
-export function createMockServices(): Services & { replenishment: ReplenishmentService; setScenario(value: MockScenario): void; getScenario(): MockScenario } {
+export function createMockServices(): Services & { replenishment: ReplenishmentService; decisions: RecommendationDecisionService; setScenario(value: MockScenario): void; getScenario(): MockScenario } {
   let products = seedProducts();
   let orders = seedOrders();
   const recommendationDrafts = new Map(purchaseRecommendations.filter(r => r.draftId).map(r => [r.id, r.draftId!]));
   let nextDraft = 3;
   let scenario: MockScenario = 'normal';
   const locks = new Set<string>();
+  const decisions = new Map<string, RecommendationOrderResult | 'rejected'>();
   const clone = <T,>(value: T): T => value === undefined ? value : JSON.parse(JSON.stringify(value)) as T;
   async function wait(signal?: AbortSignal) {
     signal?.throwIfAborted();
@@ -38,13 +40,59 @@ export function createMockServices(): Services & { replenishment: ReplenishmentS
   return {
     setScenario(value) { scenario = value },
     getScenario() { return scenario },
+    decisions: {
+      capabilities: { placeOrder: true, reject: true },
+      async placeOrder(input) {
+        validateDecision(input);
+        return mutation(`recommendation:${input.recommendationId}`, () => {
+          if (scenario === 'empty') throw new ServiceError('not_found', '현재 검토할 추천이 없습니다.');
+          const rec = purchaseRecommendations.find(item => item.id === input.recommendationId && item.productId === input.productId);
+          if (!rec) throw new ServiceError('not_found', '추천과 상품이 일치하지 않습니다.');
+          if (rec.quantity !== input.aiRecommendedQuantity) throw new ServiceError('conflict', 'AI 추천 수량이 변경되었습니다. 다시 조회해 주세요.');
+          const previous = decisions.get(rec.id);
+          if (previous === 'rejected') throw new ServiceError('conflict', '발주 안 함으로 처리한 추천입니다.');
+          if (previous) {
+            if (previous.quantity !== input.quantity) throw new ServiceError('conflict', '이미 다른 수량으로 발주했습니다. 발주 내역을 확인해 주세요.');
+            return previous;
+          }
+          const existingId = recommendationDrafts.get(rec.id);
+          const existing = existingId ? order(existingId) : undefined;
+          if (existing && existing.status !== 'draft') throw new ServiceError('conflict', '이미 처리된 발주입니다. 발주 내역을 확인해 주세요.');
+          const id = existing?.id ?? `DEMO-${String(nextDraft++).padStart(3, '0')}`;
+          const placed = { id, supplier: rec.supplier, status: 'ordered' as const, createdAt: DEMO_TIME,
+            estimatedCost: rec.unitCost === null ? null : input.quantity * rec.unitCost, allowedActions: [], receipts: [],
+            items: [{ productId: rec.productId, name: rec.productName, currentStock: product(rec.productId).quantity, expectedSales: rec.demand,
+              leadDays: rec.leadDays, recommended: rec.quantity, quantity: input.quantity, unit: rec.unit, unitCost: rec.unitCost, reason: rec.reason, warning: rec.warning }],
+          };
+          if (existing) Object.assign(existing, placed); else orders.push(placed);
+          const result = { ...input, order: existing ?? placed };
+          decisions.set(rec.id, result); recommendationDrafts.set(rec.id, id);
+          return result;
+        });
+      },
+      async reject(input) {
+        await mutation(`recommendation:${input.recommendationId}`, () => {
+          if (scenario === 'empty') throw new ServiceError('not_found', '현재 검토할 추천이 없습니다.');
+          const rec = purchaseRecommendations.find(item => item.id === input.recommendationId && item.productId === input.productId);
+          if (!rec) throw new ServiceError('not_found', '추천과 상품이 일치하지 않습니다.');
+          const previous = decisions.get(rec.id);
+          if (previous && previous !== 'rejected') throw new ServiceError('conflict', '이미 발주한 추천입니다.');
+          const linked = recommendationDrafts.get(rec.id);
+          if (linked && order(linked).status !== 'draft') throw new ServiceError('conflict', '이미 처리된 발주입니다.');
+          decisions.set(rec.id, 'rejected');
+        });
+      },
+    },
     replenishment: {
       async get(signal) {
         await wait(signal);
         return clone({ updatedAt: DEMO_TIME, budget: 100000,
           briefing: scenario === 'empty' ? '검토할 샘플 추천이 없습니다.' : '우유와 식빵의 보충 계획을 검토하세요. 달걀은 소비기한을 먼저 확인하고, 샘물은 추가 발주를 신중히 결정하세요. 고정 데모 브리핑입니다.',
-          recommendations: scenario === 'empty' ? [] : purchaseRecommendations.map(r => ({ ...r, draftId: recommendationDrafts.get(r.id) ?? null })),
-          inventory: scenario === 'empty' ? [] : planningInventory,
+          recommendations: scenario === 'empty' ? [] : purchaseRecommendations.map(r => {
+            const decision = decisions.get(r.id); const linked = recommendationDrafts.get(r.id); const existing = linked ? order(linked) : undefined;
+            return { ...r, draftId: linked ?? null, status: decision === 'rejected' ? 'rejected' : (decision || (existing && existing.status !== 'draft' && existing.status !== 'cancelled')) ? 'ordered' : 'pending', orderId: decision && decision !== 'rejected' ? decision.order.id : existing?.status !== 'draft' ? existing?.id ?? null : null, finalQuantity: decision && decision !== 'rejected' ? decision.quantity : null };
+          }),
+          inventory: scenario === 'empty' ? [] : planningInventory.map(item => ({ ...item, incomingQuantity: item.incomingQuantity === null ? null : item.incomingQuantity + [...decisions.values()].reduce((sum, decision) => decision === 'rejected' || !['ordered', 'partial'].includes(decision.order.status) ? sum : sum + decision.order.items.filter(line => line.productId === item.productId).reduce((total, line) => total + line.quantity, 0), 0) })),
         });
       },
       async createDraft(recommendationId) {
@@ -136,11 +184,11 @@ export function createMockServices(): Services & { replenishment: ReplenishmentS
       if (message.includes('이익')) return { id: `reply-${Date.now()}`, role: 'assistant', content: '데모: 원가 데이터가 충분하지 않아 매출총이익을 분석할 수 없어요.', state: 'data_insufficient' };
       if (message.includes('없는상품')) return { id: `reply-${Date.now()}`, role: 'assistant', content: '데모: 해당 상품을 찾지 못했어요.', state: 'not_found' };
       if (message.includes('과잉')) return { id: `reply-${Date.now()}`, role: 'assistant', state: 'success', content: '데모: 샘물은 최근 판매가 감소하고 있어 추가 발주를 신중히 검토하는 예시입니다. 실제 위험 분석은 서버가 제공해야 합니다.', cards: [{ title: '샘물 과잉 위험 · 샘플', text: planningInventory.find(i => i.productId === 'water')!.riskReason!, action: { label: '샘물 재고 상세', target: 'inventory', productId: 'water' } }] };
-      if (message.includes('초안')) {
+      if (message.includes('초안') || message.includes('식빵')) {
         const recommendation = purchaseRecommendations.find(r => message.includes('식빵') ? r.productId === 'bread' : r.productId === 'milk')!;
         const existing = recommendationDrafts.get(recommendation.id);
-        const action: ReplenishmentAction = existing ? { label: '발주서 상세 확인', target: 'purchases', orderId: existing } : { label: '데모 초안 만들기', target: 'purchases', recommendationId: recommendation.id };
-        return { id: `reply-${Date.now()}`, role: 'assistant', state: 'success', content: '데모: 초안 생성 요청을 확인했어요. 아래 버튼에서 추천을 확인하고 초안을 만들 수 있습니다. 질문만으로 주문이 생성·승인되지는 않아요.', cards: [{ title: `${recommendation.productName} · 초안 검토`, text: `${recommendation.reason}\n추천 ${recommendation.quantity}${recommendation.unit} · 예상 수요 ${recommendation.demand}${recommendation.unit} · 예상 금액 ${recommendation.unitCost === null ? '미제공' : `${recommendation.unitCost * recommendation.quantity}원`}`, action }] };
+        const action: ReplenishmentAction = existing ? { label: '발주서 상세 확인', target: 'purchases', orderId: existing } : { label: '추천 수량 확인', target: 'purchases', recommendationId: recommendation.id };
+        return { id: `reply-${Date.now()}`, role: 'assistant', state: 'success', content: '데모: 아래 추천 화면에서 수량을 수정하고 발주 여부를 결정하세요. 질문만으로 주문을 생성하거나 자동 발주하지 않습니다.', cards: [{ title: `${recommendation.productName} · 추천 검토`, text: `${recommendation.reason}\n추천 ${recommendation.quantity}${recommendation.unit} · 예상 수요 ${recommendation.demand}${recommendation.unit} · 예상 금액 ${recommendation.unitCost === null ? '미제공' : `${recommendation.unitCost * recommendation.quantity}원`}`, action }] };
       }
       const draftId = recommendationDrafts.get('rec-milk');
       const action: ReplenishmentAction = { label: '발주서 상세 확인', target: 'purchases', orderId: draftId };

@@ -8,3 +8,4 @@ export const mockServices = createMockServices();
 const live = createApiServices({ baseUrl: apiBaseUrl, warehouseId });
 export const services = isMock ? mockServices : live.services;
 export const replenishmentService = isMock ? mockServices.replenishment : live.replenishment;
+export const recommendationDecisions = isMock ? mockServices.decisions : live.decisions;

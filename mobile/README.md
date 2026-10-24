@@ -1,5 +1,28 @@
 # 재고·발주 중심 모바일 프론트엔드
 
+## 최신 변경: AI 추천에서 직접 발주
+
+`feat/direct-ai-order`는 최신 원격 통합 커밋 `dffac0d`에서 분리했습니다. 적용 범위는 **mobile/만**이며 루트 Vite 웹앱과 backend/는 수정하지 않습니다. 자동 발주·설정 토글·예약 실행은 구현하지 않습니다.
+
+새 화면은 **AI 추천 → 수량 수정 → 발주하기/발주 안 함 → 발주 내역 → 기존 입고 처리**입니다. 추천 목록·POS 패널·홈 요약·상품 상세에서 공통 RecommendationDecisionForm을 사용합니다. 양의 정수 검증, 처리 중 버튼 비활성화, 오류/입력 보존, 성공 상태와 내역 링크를 제공합니다. 초안 생성 확인창과 초안 화면 이동은 새 추천 흐름에서 제거했습니다. 기존 발주 상세/입고/과거 초안 기능과 서비스 계약은 삭제하지 않습니다.
+
+- **Mock:** 기존 고정 샘플을 분리한 메모리 데모로 직접 발주·거절·중복 방지·재시도를 확인합니다. AI 추천 수량과 사용자 최종 수량을 구분하며 발주만으로 현재 재고를 늘리지 않습니다. 페이지 전체 새로고침 시 샘플 상태는 초기화됩니다.
+- **실제 API:** 추천 조회와 기존 추천 거절 action API를 연결합니다. 기존 상품 저장/실사/발주 내역/입고 구현은 보존합니다. 상품별 발주 버튼은 연동 준비 상태입니다. 기존 서버는 공급업체의 승인된 추천 전체를 발행하므로, 상품 하나를 선택한 요청처럼 호출하지 않습니다. API 실패 후 자동 Mock 전환은 없습니다.
+- **백엔드 요청:** 선택 추천 하나의 원자적 발주, 원래 AI 수량/최종 수량 분리 저장, 멱등성, 결과 조회 계약이 필요합니다. 존재하지 않는 URL은 코드에 가정하지 않았습니다. [DIRECT_ORDER_API.md](./DIRECT_ORDER_API.md)에 현재/제안 API와 이유를 기록했습니다. 아래 과거 초안 중심 설명보다 이 절을 우선합니다.
+
+백엔드 없이 `mobile/`에서 `npm run web -- --port 8081` 실행 후 http://localhost:8081 또는 http://localhost:8081/purchases?view=recommendations 를 확인합니다. 기본 Mock을 유지합니다. API 모드 전환은 실제 서버 주소를 받은 뒤에만 설정합니다.
+
+수정 전 기준 검증에서는 타입/린트/웹 빌드가 통과했고 기존 테스트는 24개 중 2개가 실패했습니다. 팀원이 새로 연결한 API를 여전히 미지원으로 기대하는 테스트였으며, 실제 API 구현은 되돌리지 않고 테스트 기대값과 회귀 검사를 보완했습니다. 최종 검증 결과는 작업 완료 보고를 참고하세요.
+
+이번 변경 파일 전체(경로는 mobile/ 기준):
+
+- 신규: `src/components/cards/RecommendationDecisionForm.tsx`, `src/services/recommendationDecisions.ts`, `DIRECT_ORDER_API.md`.
+- 화면/연결: `app/settings.tsx`, `src/components/cards/ReplenishmentCards.tsx`, `src/components/common/ui.tsx`, `src/components/pos/PosOrderPanel.tsx`, `src/components/pos/PosWorkspace.tsx`, `src/features/agent/AgentScreen.tsx`, `src/features/purchases/PurchasesScreen.tsx`, `src/features/purchases/OrderScreen.tsx`.
+- 서비스/상태: `src/services/api/decoders.ts`, `src/services/api/services.ts`, `src/services/index.ts`, `src/services/mock/index.ts`, `src/services/replenishment.ts`.
+- 테스트/문서: `tests/api-fixtures.cjs`, `tests/services.test.cjs`, `README.md`, `BACKEND_HANDOFF.md`.
+
+최종 검사: TypeScript와 ESLint 통과, 서비스 테스트 32개 통과. 기존 Edge의 Mock 웹 검사에서 직접 발주/원본·최종 수량 분리/중복 클릭/내역·입고 UI/입고 오류 메시지/실패 후 입력 보존·재시도/거절/AI 액션 비자동 실행/빈 목록·권한 오류를 확인했습니다. 320·390·768·1280px에서 가로 넘침 없이 POS 하단의 발주·거절 버튼이 화면 안에 노출되는 것을 확인했습니다. 브라우저 런타임 예외와 실제 /api/ 요청은 없었습니다. 검사 중 페이지 안내 문구와 실패 요청 완료를 잘못 기다리던 로컬 검사 스크립트를 보완한 뒤 최종 통과했습니다. 로컬 스크립트·캡처·export 결과는 Git 제외입니다. 실제 API 거절 저장·개별 발주·DB/로트 반영·Android/iOS 실기기·네이티브 키보드는 미검증입니다. 패키지 추가, backend/ 및 루트 src/ 수정, commit/push는 없습니다.
+
 현재 주제는 **개인 운영 중소형 마트의 재고·발주 최적화를 위한 모바일 ERP 기반 AI 에이전트**입니다. 종합 ERP·회계·세무·인사·CRM은 핵심 범위에서 제외합니다. 루트 README와 공통 docs에는 이전 5개 탭·개발 단계 기록이 남아 있습니다. 이번 수정은 mobile/로 제한했으므로 현재 화면 구성은 이 문서를 기준으로 확인하세요. 공통 문서 정합성 반영은 팀 협의 항목입니다.
 
 ## 실행

@@ -4,6 +4,7 @@ import type { Product } from '../../types/domain';
 import { ServiceError } from '../errors';
 import { createHttpClient } from './client';
 import * as decode from './decoders';
+import { validateDecision, type RecommendationDecisionService } from '../recommendationDecisions';
 
 // 서버 ItemResponse → 앱 Product. (재고 수량·로트는 재고 조회에서 별도 제공)
 function toProduct(payload: unknown): Product {
@@ -20,7 +21,7 @@ function toProduct(payload: unknown): Product {
 interface Config { baseUrl: string; warehouseId?: string; tokenProvider?: () => Promise<string | null> }
 const unsupported = async (): Promise<never> => { throw new ServiceError('contract_pending', '이 쓰기 작업은 연동 준비 중입니다. 서버의 추천 승인·발주서 발행과 모바일 초안 흐름을 먼저 합의해야 합니다.') };
 
-export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvider }: Config): { services: Services; replenishment: ReplenishmentService } {
+export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvider }: Config): { services: Services; replenishment: ReplenishmentService; decisions: RecommendationDecisionService } {
   const request = createHttpClient(baseUrl, tokenProvider);
   const scoped = (path: string) => `/api/v1/${path}?warehouse_id=${encodeURIComponent(warehouseId)}`;
   // Share in-flight responses only within one screen load; never retain stale data across refreshes.
@@ -111,5 +112,33 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
       return po;
     },
   };
-  return { services, replenishment };
+  const decisionLocks = new Set<string>();
+  const decisions: RecommendationDecisionService = {
+    capabilities: { placeOrder: false, reject: true, placeOrderUnavailableReason: '상품별 발주 API 연동 준비 중입니다. 현재 서버 발행 API는 공급업체의 승인된 추천 전체를 포함하므로 이 카드에서 호출하지 않습니다.' },
+    placeOrder: async input => {
+      validateDecision(input);
+      throw new ServiceError('contract_pending', '선택한 추천·상품·최종 수량만 원자적으로 발주하는 API가 필요합니다. 서버에 발주를 요청하지 않았습니다.');
+    },
+    reject: async input => {
+      validateConfig();
+      if (!input.productId || !input.recommendationId) throw new ServiceError('validation', '상품과 추천을 확인해 주세요.');
+      if (decisionLocks.has(input.recommendationId)) throw new ServiceError('conflict', '이 추천을 처리 중입니다.');
+      decisionLocks.add(input.recommendationId);
+      try {
+        const payload = await request(scoped('purchases/recommend'), value => value);
+        const rec = decode.list(payload).map(decode.object).find(row => decode.string(row.rec_id) === input.recommendationId);
+        if (!rec || decode.string(rec.item_id) !== input.productId) throw new ServiceError('not_found', '추천과 상품이 일치하지 않습니다.');
+        if (decode.string(rec.warehouse_id) !== warehouseId) throw new ServiceError('forbidden', '다른 매장의 추천입니다.');
+        const status = decode.string(rec.status);
+        if (status === 'rejected') return;
+        if (status !== 'draft') throw new ServiceError('conflict', '이미 처리된 추천입니다. 새로 조회해 주세요.');
+        await request(`/api/v1/purchases/recommend/${encodeURIComponent(input.recommendationId)}/action`, value => {
+          const result = decode.object(value);
+          if (decode.string(result.status) !== 'success' || decode.string(result.rec_id) !== input.recommendationId || decode.string(result.new_status) !== 'rejected') throw new ServiceError('invalid_response', '거절 결과를 확인하지 못했습니다. 새로 조회해 주세요.');
+          return undefined;
+        }, { method: 'POST', body: JSON.stringify({ action: 'reject' }) });
+      } finally { decisionLocks.delete(input.recommendationId) }
+    },
+  };
+  return { services, replenishment, decisions };
 }
