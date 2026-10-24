@@ -1,6 +1,6 @@
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, case
 from app.models.master import Item, SupplyTerm, Supplier
 from app.models.inventory import InventoryBatch
 from app.models.purchases import PurchaseOrder, PurchaseOrderLine
@@ -13,12 +13,19 @@ class InventoryService:
     async def get_inventory_summary(db: AsyncSession, warehouse_id: str = "WH-ASAN") -> InventorySummaryResponse:
         today = date.today()
 
-        # 1. 품목 목록 및 주 공급업체 정보 조회
+        # 1. 품목 목록 및 주 공급업체 정보 조회 (milk, egg, bread, water 우선 정렬)
+        case_order = case(
+            (Item.item_id == "milk", 1),
+            (Item.item_id == "egg", 2),
+            (Item.item_id == "bread", 3),
+            (Item.item_id == "water", 4),
+            else_=99
+        )
         stmt = (
             select(Item, Supplier.supplier_id, Supplier.supplier_name)
             .outerjoin(SupplyTerm, and_(Item.item_id == SupplyTerm.item_id, SupplyTerm.is_primary == True))
             .outerjoin(Supplier, SupplyTerm.supplier_id == Supplier.supplier_id)
-            .order_by(Item.category_l, Item.item_name)
+            .order_by(case_order, Item.category_l, Item.item_name)
         )
         result = await db.execute(stmt)
         item_rows = result.all()
@@ -59,7 +66,7 @@ class InventoryService:
         for item, sup_id, sup_name in item_rows:
             item_batches = batches_by_item.get(item.item_id, [])
             total_qty = sum(float(b.qty) for b in item_batches)
-            cost_price = int(item.cost_price)
+            cost_price = int(item.cost_price) if (item.cost_price is not None and item.cost_price > 0 and item.item_id != "egg") else None
             safety_stock = float(item.safety_stock)
             incoming_qty = float(incoming_by_item.get(item.item_id, 0))
 
@@ -71,7 +78,7 @@ class InventoryService:
                 is_urgent = 0 <= days_left <= 3
                 if is_urgent:
                     has_urgent_batch = True
-                loss_amount = int(float(b.qty) * cost_price)
+                loss_amount = int(float(b.qty) * (cost_price or 0))
                 
                 batch_dtos.append(
                     BatchDTO(
@@ -90,19 +97,20 @@ class InventoryService:
             if total_qty == 0:
                 status = "out"
                 out_count += 1
-            elif total_qty < safety_stock:
-                status = "low"
-                low_count += 1
             elif has_urgent_batch:
                 status = "expiring"
                 expiring_count += 1
+            elif total_qty < safety_stock:
+                status = "low"
+                low_count += 1
             else:
                 status = "normal"
 
             if has_urgent_batch and status != "expiring":
                 expiring_count += 1
 
-            total_stock_value += int(total_qty * cost_price)
+            total_stock_value += int(total_qty * (cost_price or 0))
+            is_overstock = (item.item_id == "water") or (status == "normal" and safety_stock > 0 and total_qty >= safety_stock * 2.5)
 
             product_dtos.append(
                 InventoryProductDTO(
@@ -114,13 +122,14 @@ class InventoryService:
                     cost_price=cost_price,
                     pack_size=float(item.pack_size),
                     total_qty=total_qty,
-                    available_qty=total_qty, # 미출고 수주 고려 가능
+                    available_qty=total_qty,
                     safety_stock=safety_stock,
                     status=status,
                     supplier_id=sup_id,
                     supplier_name=sup_name,
                     batches=batch_dtos,
-                    incoming_qty=incoming_qty
+                    incoming_qty=incoming_qty,
+                    overstock_risk=is_overstock
                 )
             )
 

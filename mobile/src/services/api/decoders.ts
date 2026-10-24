@@ -52,7 +52,18 @@ export function plan(payload: unknown, inventoryPayload: unknown, stock: Invento
       const status = row.status === 'draft' ? 'pending' : row.status === 'approved' ? 'approved' : row.status === 'ordered' ? 'ordered' : row.status === 'rejected' ? 'rejected' : 'unknown';
       return { id: string(row.rec_id), productId, productName: string(row.item_name), supplier: string(row.supplier_name), unit: product?.unit ?? '단위 미제공', currentStock: numeric(row.current_stock), demand: nonnegative(row.forecast_demand), demandPeriod: '서버에서 예측 기간 미제공', quantity: nonnegative(row.recommended_qty), unitCost: product?.purchasePrice ?? null, leadDays: nonnegative(row.lead_time_days), reason: optionalString(row.reason) ?? '서버에서 추천 사유 미제공', warning: '서버 추천입니다. 실제 공급업체 발송 여부는 발주 내역과 별도로 확인하세요.', draftId: null, status, orderId: null, finalQuantity: null };
     }),
-    inventory: list(object(inventoryPayload).products).map(value => { const row = object(value); return { productId: string(row.id), incomingQuantity: row.incoming_qty === undefined ? null : nonnegative(row.incoming_qty), salesPeriod: '상품별 판매 추세 미제공', dailySales: [], overstockRisk: null, riskReason: '과잉 위험 판정은 서버에서 아직 제공하지 않습니다.' } }),
+    inventory: list(object(inventoryPayload).products).map(value => {
+      const row = object(value);
+      const isOverstock = typeof row.overstock_risk === 'boolean' ? row.overstock_risk : null;
+      return {
+        productId: string(row.id),
+        incomingQuantity: row.incoming_qty === undefined ? null : nonnegative(row.incoming_qty),
+        salesPeriod: '상품별 판매 추세 미제공',
+        dailySales: [],
+        overstockRisk: isOverstock,
+        riskReason: isOverstock ? '재고가 안전재고 대비 과다합니다.' : '과잉 위험 판정은 서버에서 아직 제공하지 않습니다.'
+      };
+    }),
   };
 }
 

@@ -211,6 +211,7 @@ class ReplenishmentService:
         po_id = f"PO-{today.strftime('%y%m%d')}-{supplier_id[-4:]}-{datetime.now().strftime('%H%M%S')}"
         po = PurchaseOrder(
             po_id=po_id,
+            warehouse_id=warehouse_id,
             supplier_id=supplier_id,
             order_date=today,
             expected_date=expected_date,
@@ -346,6 +347,7 @@ class ReplenishmentService:
         po_id = f"PO-{today.strftime('%y%m%d')}-{supplier.supplier_id[-4:]}-{datetime.now().strftime('%H%M%S')}"
         po = PurchaseOrder(
             po_id=po_id,
+            warehouse_id=warehouse_id,
             supplier_id=supplier.supplier_id,
             order_date=today,
             expected_date=expected_date,
