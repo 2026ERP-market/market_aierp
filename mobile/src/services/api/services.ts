@@ -64,7 +64,18 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
       const [recommendations, inventoryPayload] = await Promise.all([get(scoped('purchases/recommend'), value => value, signal), get(inventoryPath, value => value, signal)]);
       return decode.plan(recommendations, inventoryPayload, decode.inventory(inventoryPayload), dashboard.briefing);
     },
-    createDraft: unsupported,
+    // 추천을 실제 발주로 연결: 해당 추천을 승인하고, 그 공급사의 발주서를 발행한 뒤 PO를 돌려준다.
+    createDraft: async (recommendationId) => {
+      validateConfig();
+      const recsPayload = await request(scoped('purchases/recommend'), value => value);
+      const rec = decode.list(recsPayload).map(decode.object).find(r => decode.string(r.rec_id) === recommendationId);
+      if (!rec) throw new ServiceError('not_found', '추천을 찾지 못했습니다.');
+      const supplierId = decode.string(rec.supplier_id);
+      await request(`/api/v1/purchases/recommend/${encodeURIComponent(recommendationId)}/action`, value => value, { method: 'POST', body: JSON.stringify({ action: 'approve' }) });
+      const poPayload = await request(`/api/v1/purchases/orders?supplier_id=${encodeURIComponent(supplierId)}`, value => value, { method: 'POST', body: '{}' });
+      const inventoryPayload = await request(inventoryPath, value => value);
+      return decode.orders([poPayload], decode.inventory(inventoryPayload))[0];
+    },
   };
   return { services, replenishment };
 }
