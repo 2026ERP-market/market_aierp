@@ -207,8 +207,8 @@ class ReplenishmentService:
         lead_time = supplier.lead_time_days if supplier else 2
         expected_date = today + timedelta(days=lead_time)
 
-        # PO ID 생성
-        po_id = f"PO-{today.strftime('%y%m%d')}-{supplier_id[-4:]}"
+        # PO ID 생성 (같은 공급사·당일 반복 발행 시 충돌하지 않도록 시각 suffix 포함)
+        po_id = f"PO-{today.strftime('%y%m%d')}-{supplier_id[-4:]}-{datetime.now().strftime('%H%M%S')}"
         po = PurchaseOrder(
             po_id=po_id,
             supplier_id=supplier_id,
