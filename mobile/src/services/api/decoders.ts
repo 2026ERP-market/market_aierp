@@ -8,6 +8,7 @@ export function object(value: unknown): Row { if (!value || typeof value !== 'ob
 export function list(value: unknown): unknown[] { if (!Array.isArray(value)) invalid(); return value }
 export function string(value: unknown): string { if (typeof value !== 'string') invalid(); return value }
 export function numeric(value: unknown): number { if (typeof value !== 'number' || !Number.isFinite(value)) invalid(); return value }
+export function boolean(value: unknown): boolean { if (typeof value !== 'boolean') invalid(); return value }
 function nonnegative(value: unknown): number { const n = numeric(value); if (n < 0) invalid(); return n }
 function optionalNumber(value: unknown): number | null { return value === null || value === undefined ? null : numeric(value) }
 function optionalString(value: unknown): string | null { return value === null || value === undefined ? null : string(value) }

@@ -50,6 +50,7 @@ async def create_purchase_order(
 @router.get("/orders", response_model=list[PurchaseOrderResponse])
 async def list_purchase_orders(
     status: str | None = None,
+    warehouse_id: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """발주서(PO) 목록 조회"""
@@ -60,6 +61,8 @@ async def list_purchase_orders(
     )
     if status:
         stmt = stmt.where(PurchaseOrder.status == status)
+    if warehouse_id:
+        stmt = stmt.where(PurchaseOrder.warehouse_id == warehouse_id)
 
     res = await db.execute(stmt)
     rows = res.all()
@@ -94,7 +97,10 @@ async def list_purchase_orders(
                 total_amount=po.total_amount,
                 status=po.status,
                 lines=line_dtos,
-                created_at=po.created_at
+                created_at=po.created_at,
+                source=po.source or "manual",
+                automation_run_id=po.automation_run_id,
+                recommendation_id=po.rec_id
             )
         )
     return orders_dto

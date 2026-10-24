@@ -216,7 +216,9 @@ class ReplenishmentService:
             order_date=today,
             expected_date=expected_date,
             total_amount=0,
-            status="ordered"
+            status="ordered",
+            source="manual",
+            created_at=datetime.utcnow()
         )
         db.add(po)
 
@@ -264,7 +266,10 @@ class ReplenishmentService:
             total_amount=po.total_amount,
             status="ordered",
             lines=lines_dto,
-            created_at=po.created_at
+            created_at=po.created_at,
+            source="manual",
+            automation_run_id=None,
+            recommendation_id=None
         )
 
     @staticmethod
@@ -353,6 +358,9 @@ class ReplenishmentService:
             expected_date=expected_date,
             total_amount=total_amount,
             status="ordered",
+            source="manual",
+            rec_id=recommendation_id,
+            rec_model_version="dow-seasonal-v1",
             created_at=datetime.utcnow()
         )
         db.add(po)
@@ -390,5 +398,8 @@ class ReplenishmentService:
             total_amount=total_amount,
             status="ordered",
             lines=[line_dto],
-            created_at=po.created_at
+            created_at=po.created_at,
+            source=po.source or "manual",
+            automation_run_id=po.automation_run_id,
+            recommendation_id=po.rec_id
         )

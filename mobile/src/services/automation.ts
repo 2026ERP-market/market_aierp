@@ -15,10 +15,113 @@ export interface AutomationService {
   subscribe(listener: () => void): () => void;
   setEnabled(enabled: boolean): Promise<void>;
   runDemo(): Promise<void>;
+  refresh?(): Promise<void>;
 }
 
-// Mock event runner only. Live automation must run on the server, never from render/GET/timers.
-export function createAutomationService(mock: boolean, plan: ReplenishmentService, decisions: RecommendationDecisionService): AutomationService {
+export interface AutomationApiAdapter {
+  getSettings(signal?: AbortSignal): Promise<{ enabled: boolean; version: number; workerStatus: string }>;
+  saveSettings(enabled: boolean, expectedVersion: number): Promise<{ enabled: boolean; version: number; workerStatus: string }>;
+  listRuns(signal?: AbortSignal): Promise<AutomationResult[]>;
+}
+
+// Mock event runner & live server adapter. Live automation runs on the server, never from render/GET/timers.
+export function createAutomationService(
+  mock: boolean,
+  plan: ReplenishmentService,
+  decisions: RecommendationDecisionService,
+  apiAdapter?: AutomationApiAdapter
+): AutomationService {
+  if (!mock && apiAdapter) {
+    let currentVersion = 1;
+    let state: AutomationSnapshot = {
+      source: 'api',
+      available: true,
+      enabled: false,
+      running: false,
+      runs: 0,
+      results: []
+    };
+    const listeners = new Set<() => void>();
+    const update = (next: Partial<AutomationSnapshot>) => {
+      state = { ...state, ...next };
+      listeners.forEach(listener => listener());
+    };
+
+    let initialLoadDone = false;
+    async function loadInitial() {
+      if (initialLoadDone) return;
+      initialLoadDone = true;
+      try {
+        const [settings, runs] = await Promise.all([
+          apiAdapter!.getSettings(),
+          apiAdapter!.listRuns()
+        ]);
+        currentVersion = settings.version;
+        update({
+          enabled: settings.enabled,
+          running: settings.workerStatus === 'running',
+          results: runs,
+          runs: runs.length,
+          error: undefined
+        });
+      } catch (e) {
+        update({ error: errorMessage(e) });
+      }
+    }
+
+    void loadInitial();
+
+    return {
+      getSnapshot: () => {
+        if (!initialLoadDone) void loadInitial();
+        return state;
+      },
+      subscribe: listener => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      },
+      async setEnabled(enabled: boolean) {
+        if (state.running) throw new ServiceError('conflict', '이전 작업이 처리 중입니다. 완료 후 다시 시도해 주세요.');
+        update({ running: true, error: undefined });
+        try {
+          const saved = await apiAdapter!.saveSettings(enabled, currentVersion);
+          currentVersion = saved.version;
+          const runs = await apiAdapter!.listRuns();
+          update({
+            enabled: saved.enabled,
+            running: false,
+            results: runs,
+            runs: runs.length
+          });
+        } catch (error) {
+          update({ running: false, error: errorMessage(error) });
+          throw error;
+        }
+      },
+      async runDemo() {
+        throw new ServiceError('validation', '운영 API 모드에서는 runDemo를 실행할 수 없습니다. AI 자동 발주는 서버 정책에 따라 자동으로 처리됩니다.');
+      },
+      async refresh() {
+        try {
+          const [settings, runs] = await Promise.all([
+            apiAdapter!.getSettings(),
+            apiAdapter!.listRuns()
+          ]);
+          currentVersion = settings.version;
+          update({
+            enabled: settings.enabled,
+            running: settings.workerStatus === 'running',
+            results: runs,
+            runs: runs.length,
+            error: undefined
+          });
+        } catch (e) {
+          update({ error: errorMessage(e) });
+        }
+      }
+    };
+  }
+
   let state: AutomationSnapshot = { source: mock ? 'mock' : 'api', available: mock, enabled: mock ? false : null, running: false, runs: 0, results: [] };
   const listeners = new Set<() => void>();
   const update = (next: Partial<AutomationSnapshot>) => { state = { ...state, ...next }; listeners.forEach(listener => listener()) };

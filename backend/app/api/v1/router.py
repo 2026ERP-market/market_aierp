@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    dashboard, items, inventory, sales, forecasts, purchases, external, agent
+    dashboard, items, inventory, sales, forecasts, purchases, external, agent, automation
 )
 
 api_router = APIRouter()
@@ -13,3 +13,4 @@ api_router.include_router(forecasts.router)
 api_router.include_router(purchases.router)
 api_router.include_router(external.router)
 api_router.include_router(agent.router)
+api_router.include_router(automation.router)

@@ -1,6 +1,7 @@
 import type { Services } from '../contracts';
 import type { ReplenishmentService } from '../replenishment';
 import type { Product } from '../../types/domain';
+import type { AutomationApiAdapter } from '../automation';
 import { ServiceError } from '../errors';
 import { createHttpClient } from './client';
 import * as decode from './decoders';
@@ -21,7 +22,12 @@ function toProduct(payload: unknown): Product {
 interface Config { baseUrl: string; warehouseId?: string; tokenProvider?: () => Promise<string | null> }
 const unsupported = async (): Promise<never> => { throw new ServiceError('contract_pending', '이 쓰기 작업은 연동 준비 중입니다. 서버의 추천 승인·발주서 발행과 모바일 초안 흐름을 먼저 합의해야 합니다.') };
 
-export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvider }: Config): { services: Services; replenishment: ReplenishmentService; decisions: RecommendationDecisionService } {
+export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvider }: Config): {
+  services: Services;
+  replenishment: ReplenishmentService;
+  decisions: RecommendationDecisionService;
+  automationAdapter?: AutomationApiAdapter;
+} {
   const request = createHttpClient(baseUrl, tokenProvider);
   const scoped = (path: string) => `/api/v1/${path}?warehouse_id=${encodeURIComponent(warehouseId)}`;
   // Share in-flight responses only within one screen load; never retain stale data across refreshes.
@@ -176,5 +182,67 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
       } finally { decisionLocks.delete(input.recommendationId) }
     },
   };
-  return { services, replenishment, decisions };
+
+  const automationAdapter: AutomationApiAdapter = {
+    getSettings: async signal => {
+      validateConfig();
+      const res = await request(scoped('automation/settings'), value => value, { signal });
+      const obj = decode.object(res);
+      return {
+        enabled: decode.boolean(obj.enabled),
+        version: decode.numeric(obj.version),
+        workerStatus: decode.string(obj.worker_status),
+      };
+    },
+    saveSettings: async (enabled, expectedVersion) => {
+      validateConfig();
+      const res = await request('/api/v1/automation/settings', value => value, {
+        method: 'PUT',
+        body: JSON.stringify({
+          warehouse_id: warehouseId,
+          enabled,
+          expected_version: expectedVersion,
+          agreed_by: 'STORE_OWNER',
+          policy_version: 'v1',
+        }),
+      });
+      const obj = decode.object(res);
+      return {
+        enabled: decode.boolean(obj.enabled),
+        version: decode.numeric(obj.version),
+        workerStatus: decode.string(obj.worker_status),
+      };
+    },
+    listRuns: async signal => {
+      validateConfig();
+      const res = await request(scoped('automation/runs'), value => value, { signal });
+      const obj = decode.object(res);
+      const runs = decode.list(obj.runs);
+      return runs.map(r => {
+        const row = decode.object(r);
+        const rawStatus = decode.string(row.status);
+        const status: 'ordered' | 'skipped' | 'failed' =
+          rawStatus === 'created' || rawStatus === 'dispatched' || rawStatus === 'ordered'
+            ? 'ordered'
+            : rawStatus === 'failed'
+            ? 'failed'
+            : 'skipped';
+        return {
+          recommendationId: decode.string(row.recommendation_id) || decode.string(row.run_id),
+          productName: decode.string(row.product_name) || decode.string(row.item_name) || '품목',
+          quantity: decode.numeric(row.final_qty),
+          status,
+          message: decode.string(row.reason) || '',
+          orderId: row.order_id ? decode.string(row.order_id) : undefined,
+        };
+      });
+    },
+  };
+
+  return {
+    services,
+    replenishment,
+    decisions,
+    automationAdapter: isTestPlaceholder(baseUrl) ? undefined : automationAdapter,
+  };
 }

@@ -63,6 +63,9 @@ class PurchaseOrderResponse(BaseModel):
     status: OrderStatus
     lines: list[PurchaseOrderLineDTO]
     created_at: datetime
+    source: str = "manual"
+    automation_run_id: str | None = None
+    recommendation_id: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 class ReceiveOrderRequest(BaseModel):

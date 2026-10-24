@@ -14,6 +14,13 @@ class PurchaseOrder(Base):
     received_date: Mapped[date | None] = mapped_column(Date)
     total_amount: Mapped[int] = mapped_column(BigInteger, default=0)
     status: Mapped[str] = mapped_column(String(20), default="draft")
+    source: Mapped[str] = mapped_column(String(20), default="manual", nullable=False)
+    automation_run_id: Mapped[str | None] = mapped_column(String(50))
+    rec_id: Mapped[str | None] = mapped_column(String(50))
+    rec_model_version: Mapped[str | None] = mapped_column(String(50))
+    memo: Mapped[str | None] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     lines: Mapped[list["PurchaseOrderLine"]] = relationship("PurchaseOrderLine", back_populates="order", cascade="all, delete-orphan")
