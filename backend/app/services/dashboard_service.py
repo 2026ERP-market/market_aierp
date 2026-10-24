@@ -70,7 +70,8 @@ class DashboardService:
 
         return DashboardSummaryResponse(
             store_name="아산 스마트마트 본점",
-            date=today.strftime("%Y년 %m월 %d일"),
+            # API는 ISO(YYYY-MM-DD)로 날짜를 반환하고, 한글 표기는 클라이언트가 포맷한다.
+            date=today.isoformat(),
             revenue=today_rev,
             change_percent=8.4,
             stockout_count=inv_summary.out_of_stock_count,
