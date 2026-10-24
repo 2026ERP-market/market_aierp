@@ -7,10 +7,10 @@ import { isMock } from '../../services';
 export function Button({ title, onPress, disabled, secondary = false }: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled: !!disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [ui.button, secondary && { backgroundColor: colors.primarySoft }, { opacity: disabled ? 0.45 : pressed ? 0.75 : 1 }]}><Text style={{ fontSize: 16, fontWeight: '700', color: secondary ? colors.primary : '#fff', textAlign: 'center' }}>{title}</Text></Pressable>;
 }
-export function Screen({ title, subtitle, children, loading, onRefresh, action, showSettings = true }: PropsWithChildren<{ title: string; subtitle?: string; loading?: boolean; onRefresh?: () => void; action?: ReactNode; showSettings?: boolean }>) {
-  return <SafeAreaView edges={['top', 'left', 'right']} style={ui.page}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={ui.content} refreshControl={onRefresh ? <RefreshControl refreshing={!!loading} onRefresh={onRefresh} /> : undefined}>
+export function Screen({ title, subtitle, children, loading, onRefresh, action, showSettings = true, variant = 'standard' }: PropsWithChildren<{ title: string; subtitle?: string; loading?: boolean; onRefresh?: () => void; action?: ReactNode; showSettings?: boolean; variant?: 'standard' | 'pos' }>) {
+  return <SafeAreaView edges={['top', 'left', 'right']} style={ui.page}><KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[ui.content, variant === 'pos' && { gap: 14, paddingTop: 16 }]} refreshControl={onRefresh ? <RefreshControl refreshing={!!loading} onRefresh={onRefresh} /> : undefined}>
     <View style={ui.between}><Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>MARKET / 매장 관리</Text>{showSettings && <Button title="설정" secondary onPress={() => router.push('/settings')} />}</View>
-    <Notice>{isMock ? '데모 데이터 · 실제 매장과 연결되지 않아요. 변경은 메모리에서만 유지되며 앱 재시작 시 초기화됩니다.' : '실제 API 모드 · 명세·인증 협의 전 연결과 저장이 차단됩니다.'}</Notice>
+    <Notice>{isMock ? variant === 'pos' ? '샘플 데이터 · 실제 발주·입고 없음' : '데모 데이터 · 실제 매장과 연결되지 않아요. 변경은 메모리에서만 유지되며 앱 재시작 시 초기화됩니다.' : '실제 API 모드 · 명세·인증 협의 전 연결과 저장이 차단됩니다.'}</Notice>
     <View style={ui.between}><View style={{ flex: 1, minWidth: 200, gap: 6 }}><Text accessibilityRole="header" style={ui.title}>{title}</Text>{subtitle && <Text style={ui.muted}>{subtitle}</Text>}</View>{action}</View>
     {children}
   </ScrollView></KeyboardAvoidingView></SafeAreaView>;
