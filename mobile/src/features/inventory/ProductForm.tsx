@@ -22,8 +22,8 @@ export default function ProductForm() {
       await services.products.save({ name: form.name.trim(), barcode: form.barcode.trim(), category: form.category.trim(), unit: form.unit.trim(), price: Number(form.price) }, id);
     }, '데모 상품을 저장했어요. 재고 탭으로 돌아가면 새 목록이 표시됩니다.');
   }
-  return <Screen title={id ? '상품 정보 수정' : '새 상품 등록'}><ResourceState {...query} hasData={!!query.data} retry={query.reload} /><Card><Notice>데모 저장은 메모리에서만 유지됩니다. 실제 서버 저장은 API 명세와 권한 확인 후 연결합니다. 재고 수량은 여기서 수정하지 않습니다.</Notice>
+  return <Screen title={id ? '상품 정보 수정' : '새 상품 등록'}><ResourceState {...query} hasData={!!query.data} retry={query.reload} /><Card><Notice>{isMock ? '데모 저장은 메모리에서만 유지됩니다. 재고 수량은 여기서 수정하지 않습니다.' : '서버 품목 마스터에 저장됩니다. 바코드는 서버 미지원, 재고 수량은 여기서 수정하지 않아요.'}</Notice>
     {(['name', 'barcode', 'category', 'unit', 'price'] as const).map(field => <Field key={field} label={{ name: '상품명', barcode: '바코드', category: '카테고리', unit: '수량 단위', price: '판매가 (원)' }[field]} value={form[field]} onChangeText={value => edit(field, value)} keyboardType={field === 'price' ? 'number-pad' : 'default'} />)}
-    {action.message && <Notice error={action.failed}>{action.message}</Notice>}<Button title={action.busy ? '저장 중…' : '데모 상품 저장'} disabled={action.busy || query.loading || !!query.error || !isMock || Object.values(form).some(v => !v.trim())} onPress={save} />
+    {action.message && <Notice error={action.failed}>{action.message}</Notice>}<Button title={action.busy ? '저장 중…' : isMock ? '데모 상품 저장' : '상품 저장'} disabled={action.busy || query.loading || !!query.error || Object.values(form).some(v => !v.trim())} onPress={save} />
   </Card></Screen>;
 }

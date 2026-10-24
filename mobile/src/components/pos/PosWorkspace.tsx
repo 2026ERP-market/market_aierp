@@ -46,9 +46,9 @@ export function PosWorkspace({ data, loading, error, onRefresh, onOpenOverview }
     }, '샘플 초안을 저장했습니다. 실제 발주는 전송하지 않았습니다.');
   }
   async function createDraft() {
-    if (!recommendation || !isMock || loading) return;
+    if (!recommendation || loading) return;
     setConfirmation(undefined);
-    await action.run(async () => { await replenishmentService.createDraft(recommendation.id); await onRefresh() }, '샘플 초안을 만들었습니다. 승인하려면 발주서를 검토하세요.');
+    await action.run(async () => { await replenishmentService.createDraft(recommendation.id); await onRefresh() }, isMock ? '샘플 초안을 만들었습니다. 승인하려면 발주서를 검토하세요.' : '발주서를 발행했습니다. 발주 현황에서 확인하세요.');
   }
   function clear() {
     setSelectedId(null);
@@ -65,7 +65,7 @@ export function PosWorkspace({ data, loading, error, onRefresh, onOpenOverview }
         <View style={[c.barRight, !wide && { marginLeft: 'auto' }]}>{wide && data && <Text style={c.time}>갱신 {new Date(data.plan.updatedAt).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' })}</Text>}<Pressable accessibilityRole="button" accessibilityLabel="발주 승인 대기 확인" onPress={() => router.push({ pathname: '/purchases', params: { view: 'approval' } })} style={c.iconButton}><View style={{ alignItems: 'center' }}><View style={{ width: 17, height: 19, borderTopLeftRadius: 9, borderTopRightRadius: 9, backgroundColor: '#D9E0E5' }} /><View style={{ width: 23, height: 3, borderRadius: 2, backgroundColor: '#D9E0E5' }} /><View style={{ width: 5, height: 3, marginTop: 2, borderRadius: 2, backgroundColor: '#D9E0E5' }} /></View></Pressable><Pressable accessibilityRole="button" accessibilityLabel="설정 열기" onPress={() => router.push('/settings')} style={c.iconButton}><Text style={c.iconText}>⋮</Text></Pressable></View>
         {!wide && navigation}
       </View>
-      <View style={c.source}><Text style={c.sourceText}>{isMock ? '샘플 데이터 · 실제 발주·입고·결제 없음' : '실제 API · 서버 조회 / 발주 변경 연동 준비 중'}</Text>{data && <Text style={c.sourceText}>{data.summary.store.name} · 부족/품절 {data.summary.stockoutCount} · 소비기한 주의 {data.summary.expiringCount}</Text>}</View>
+      <View style={c.source}><Text style={c.sourceText}>{isMock ? '샘플 데이터 · 실제 발주·입고·결제 없음' : '실제 API · 발주서 발행 연결됨 / 입고·결제 미지원'}</Text>{data && <Text style={c.sourceText}>{data.summary.store.name} · 부족/품절 {data.summary.stockoutCount} · 소비기한 주의 {data.summary.expiringCount}</Text>}</View>
       {(loading || error) && <View style={{ padding: 12 }}><ResourceState loading={loading} error={error} hasData={!!data} retry={onRefresh} /></View>}
       {!wide && <View style={c.mobileSwitch}>{[{ label: '상품 선택', value: false }, { label: '발주 패널', value: true }].map(tab => <Pressable key={tab.label} accessibilityRole="tab" accessibilityState={{ selected: mobilePanel === tab.value }} onPress={() => setMobilePanel(tab.value)} style={[c.mobileSwitchButton, mobilePanel === tab.value && c.mobileSwitchActive]}><Text style={c.mobileSwitchText}>{tab.label}</Text></Pressable>)}</View>}
       <View style={c.body}>
@@ -76,7 +76,7 @@ export function PosWorkspace({ data, loading, error, onRefresh, onOpenOverview }
         { label: '발주 화면으로', run: () => setDrawer(false) }, { label: '업무 요약 보기', run: openOverview },
         { label: '재고 확인', run: () => router.push('/inventory') }, { label: '발주·입고 내역', run: openOrders },
         { label: 'AI 도우미', run: () => router.push('/agent') }, { label: '설정', run: () => router.push('/settings') },
-      ].map(item => <Pressable key={item.label} accessibilityRole="button" onPress={() => { setDrawer(false); item.run() }} style={[c.drawerItem, { marginBottom: 10 }]}><Text style={c.drawerText}>{item.label}</Text></Pressable>)}<Text style={c.panelNote}>입고 등록과 실제 API 연결은 준비 중입니다. POS 결제 기능은 제공하지 않습니다.</Text></ScrollView></SafeAreaView><Pressable accessibilityRole="button" accessibilityLabel="업무 메뉴 닫기" onPress={() => setDrawer(false)} style={{ flex: 1 }} /></View></Modal>
+      ].map(item => <Pressable key={item.label} accessibilityRole="button" onPress={() => { setDrawer(false); item.run() }} style={[c.drawerItem, { marginBottom: 10 }]}><Text style={c.drawerText}>{item.label}</Text></Pressable>)}<Text style={c.panelNote}>입고 등록은 준비 중입니다. POS 결제 기능은 제공하지 않습니다.</Text></ScrollView></SafeAreaView><Pressable accessibilityRole="button" accessibilityLabel="업무 메뉴 닫기" onPress={() => setDrawer(false)} style={{ flex: 1 }} /></View></Modal>
       <ConfirmDialog visible={!!confirmation} title={confirmation === 'overview' ? '편집을 종료하고 요약을 볼까요?' : confirmation === 'clear' ? '편집한 수량을 지울까요?' : '샘플 발주 초안을 만들까요?'} text={confirmation === 'overview' ? '저장하지 않은 수량 입력은 사라집니다. 보존하려면 취소한 뒤 초안을 저장하세요.' : confirmation === 'clear' ? '저장하지 않은 수량 입력과 화면 선택만 지웁니다. 기존 발주서는 삭제되지 않습니다.' : `${product?.name ?? ''}의 AI 추천으로 샘플 초안을 만듭니다. 실제 발주 전송과 승인은 수행하지 않습니다.`} onCancel={() => setConfirmation(undefined)} onConfirm={confirmation === 'overview' ? onOpenOverview : confirmation === 'clear' ? clear : createDraft} busy={action.busy} confirmLabel={confirmation === 'overview' ? '업무 요약으로 이동' : confirmation === 'clear' ? '편집 지우기' : '샘플 초안 만들기'} />
     </KeyboardAvoidingView>
   </SafeAreaView>;

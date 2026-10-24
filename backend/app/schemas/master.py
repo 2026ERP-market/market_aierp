@@ -24,6 +24,15 @@ class ItemResponse(ItemBase):
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
+class ItemUpdate(BaseModel):
+    """품목 수정 (보낸 필드만 반영)"""
+    item_name: str | None = None
+    category_l: str | None = None
+    uom: str | None = None
+    sale_price: int | None = None
+    cost_price: int | None = None
+    safety_stock: float | None = None
+
 class SupplierBase(BaseModel):
     supplier_id: str
     supplier_name: str
