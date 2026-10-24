@@ -7,10 +7,96 @@ from app.models.purchases import OrderRecommendation
 from app.models.sales import Sales
 from app.models.features import WeatherForecast
 from app.schemas.agent import AgentChatResponse, AgentCard, AgentAction
+from app.services.inventory_service import InventoryService
+from app.core.config import settings
+
+LLM_MODEL = "gpt-4o-mini"
+SYSTEM_PROMPT = (
+    "당신은 한국 중소마트의 AI 매니저입니다. 아래 '[ERP 데이터]'에 주어진 실시간 수치만 근거로 "
+    "한국어로 간결하게 답하세요. 데이터에 없는 수치는 추측하거나 지어내지 말고 '데이터가 없습니다'라고 하세요. "
+    "발주·입고 같은 실제 작업을 임의로 실행하지 말고, 필요하면 해당 화면으로 안내만 하세요."
+)
+
 
 class AgentService:
     @staticmethod
     async def chat(db: AsyncSession, message: str, warehouse_id: str = "WH-ASAN") -> AgentChatResponse:
+        # OpenAI 키가 설정돼 있으면 LLM으로 답하고, 없거나 실패하면 키워드 방식으로 폴백한다.
+        if settings.OPENAI_API_KEY:
+            try:
+                return await AgentService._llm_chat(db, message, warehouse_id)
+            except Exception:
+                pass
+        return await AgentService._keyword_chat(db, message, warehouse_id)
+
+    # ---------------------------------------------------------------- LLM
+    @staticmethod
+    async def _gather_context(db: AsyncSession, warehouse_id: str) -> str:
+        lines: list[str] = []
+        inv = await InventoryService.get_inventory_summary(db, warehouse_id)
+        lines.append(
+            f"재고요약: 품목 {len(inv.products)}종, 재고가치 {inv.total_stock_value:,}원, "
+            f"품절 {inv.out_of_stock_count}건, 안전재고미달 {inv.low_stock_count}건, 소비기한임박 {inv.expiring_soon_count}건"
+        )
+        risky = [p for p in inv.products if p.status in ("out", "low", "expiring")]
+        for p in risky[:8]:
+            lines.append(f"- {p.name}: 재고 {p.total_qty:.0f}{p.unit}, 안전재고 {p.safety_stock:.0f}, 상태 {p.status}")
+
+        rec_rows = (await db.execute(
+            select(OrderRecommendation, Item)
+            .join(Item, OrderRecommendation.item_id == Item.item_id)
+            .where(OrderRecommendation.status.in_(["draft", "approved"]))
+            .limit(8)
+        )).all()
+        for rec, item in rec_rows:
+            lines.append(
+                f"- 발주추천 {item.item_name}: {rec.recommended_qty:.0f}{item.uom} "
+                f"(현재 {rec.current_stock:.0f}, 예측수요 {rec.forecast_demand:.1f}, 안전재고 {rec.safety_stock:.1f})"
+            )
+
+        weather = (await db.execute(
+            select(WeatherForecast).order_by(WeatherForecast.target_date.asc()).limit(3)
+        )).scalars().all()
+        for w in weather:
+            lines.append(f"- 날씨 {w.target_date:%m/%d}: 최고 {w.temp_max}℃, 강수확률 {int((w.pop or 0)*100)}%")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _pick_card(message: str) -> AgentCard:
+        m = message.lower()
+        if any(k in m for k in ["발주", "추천", "주문", "부족", "날씨", "비"]):
+            return AgentCard(title="AI 발주 추천", text="추천 품목과 수량을 확인하세요.",
+                             action=AgentAction(label="발주 추천 보기", target="purchases"))
+        if any(k in m for k in ["매출", "판매", "실적"]):
+            return AgentCard(title="판매 현황", text="기간별 매출과 순위를 확인하세요.",
+                             action=AgentAction(label="판매 화면", target="sales"))
+        return AgentCard(title="재고 현황", text="전체 품목의 실재고를 확인하세요.",
+                         action=AgentAction(label="재고 화면으로 이동", target="inventory"))
+
+    @staticmethod
+    async def _llm_chat(db: AsyncSession, message: str, warehouse_id: str) -> AgentChatResponse:
+        from openai import AsyncOpenAI
+
+        context = await AgentService._gather_context(db, warehouse_id)
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        completion = await client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"{message.strip()}\n\n[ERP 데이터]\n{context}"},
+            ],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        content = (completion.choices[0].message.content or "").strip()
+        if not content:
+            raise RuntimeError("empty LLM response")
+        return AgentChatResponse(id=str(uuid.uuid4()), content=content, cards=[AgentService._pick_card(message)])
+
+    # ------------------------------------------------------------ keyword
+    @staticmethod
+    async def _keyword_chat(db: AsyncSession, message: str, warehouse_id: str = "WH-ASAN") -> AgentChatResponse:
         msg = message.strip().lower()
         msg_id = str(uuid.uuid4())
 
