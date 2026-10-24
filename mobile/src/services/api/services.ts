@@ -70,7 +70,14 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
         await request('/api/v1/inventory/adjust', value => value, { method: 'POST', body: JSON.stringify({ item_id: input.productId, warehouse_id: warehouseId, adjusted_qty: input.counted, reason: input.reason }) });
       },
     },
-    purchases: { list: purchases, get: async (id, signal) => { const order = (await purchases(signal)).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order }, save: unsupported, approve: async (id) => { const order = (await purchases()).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order } },
+    purchases: { list: purchases, get: async (id, signal) => { const order = (await purchases(signal)).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order }, save: unsupported, approve: async (id) => { const order = (await purchases()).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order }, receive: async (id, lines) => {
+      validateConfig();
+      const received_items = lines.map((l, i) => ({ line_no: i + 1, received_qty: l.receivedQty, expiry_date: l.expiry }));
+      await request(`/api/v1/purchases/orders/${encodeURIComponent(id)}/receive`, value => value, { method: 'POST', body: JSON.stringify({ received_items }) });
+      const order = (await purchases()).find(item => item.id === id);
+      if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.');
+      return order;
+    } },
     sales: { get: async (range, signal) => {
       const start = decode.date(range.start); const end = decode.date(range.end);
       const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());

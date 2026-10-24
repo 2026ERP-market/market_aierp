@@ -12,6 +12,7 @@ export interface PurchaseOrderService {
   get(id: string, signal?: AbortSignal): Promise<PurchaseOrder>;
   save(id: string, quantities: number[]): Promise<PurchaseOrder>;
   approve(id: string): Promise<PurchaseOrder>;
+  receive(id: string, lines: { receivedQty: number; expiry: string | null }[]): Promise<PurchaseOrder>;
 }
 export interface AgentService { send(message: string, signal?: AbortSignal): Promise<AgentMessage> }
 export interface Services {

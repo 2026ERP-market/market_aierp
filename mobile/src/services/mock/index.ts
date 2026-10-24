@@ -121,6 +121,13 @@ export function createMockServices(): Services & { replenishment: ReplenishmentS
         if (!value.items.some(i => i.quantity > 0)) throw new ServiceError('validation', '발주 수량이 1개 이상이어야 합니다.');
         value.status = 'approved'; value.allowedActions = []; return value;
       }) },
+      async receive(id, lines) { return mutation(`order:${id}`, () => {
+        const value = order(id);
+        lines.forEach(l => requireInteger(l.receivedQty));
+        value.status = 'received'; value.allowedActions = [];
+        value.receipts = value.items.map((item, i) => ({ date: '2026-10-24', name: item.name, quantity: lines[i]?.receivedQty ?? item.quantity }));
+        return value;
+      }) },
     },
     agent: { async send(message, signal) {
       await wait(signal);
