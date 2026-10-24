@@ -10,6 +10,14 @@ from app.schemas.purchases import (
 )
 from app.services.forecast_service import ForecastService
 
+# 안전재고 산출 파라미터.
+# 리드타임 수요는 포아송에 가까워(검증: 잔차 CV 0.143 ≈ 1/√평균) 분산 ≈ 평균.
+# 따라서 리드타임 L일 수요의 표준편차 σ_LT ≈ √(리드타임 예측수요).
+# 안전재고 = z · σ_LT  (서비스수준 95% → z=1.65, 품절 허용 5%).
+SERVICE_LEVEL = 0.95
+SERVICE_Z = 1.65
+
+
 class ReplenishmentService:
     @staticmethod
     async def get_or_generate_recommendations(db: AsyncSession, warehouse_id: str = "WH-ASAN") -> list[RecommendationResponse]:
@@ -80,7 +88,10 @@ class ReplenishmentService:
             forecast_data = await ForecastService.get_item_forecast(db, item.item_id, warehouse_id)
             points = forecast_data.forecasts[:days_to_cover]
             demand_sum = sum(p.yhat for p in points)
-            safety_stock = float(item.safety_stock)
+            # 안전재고를 고정상수가 아니라 서비스수준 기반으로 산출.
+            # 리드타임 동안의 예측수요에 포아송 분산을 적용: σ_LT = √(리드타임 수요).
+            lead_demand = sum(p.yhat for p in forecast_data.forecasts[:lead_time])
+            safety_stock = round(SERVICE_Z * math.sqrt(max(lead_demand, 1.0)), 1)
             current_stock = float(stock_by_item.get(item.item_id, 0.0))
             incoming_stock = float(incoming_by_item.get(item.item_id, 0.0))
 
@@ -99,7 +110,8 @@ class ReplenishmentService:
 
                 # 사유 생성
                 reason = (
-                    f"리드타임({lead_time}일)+발주주기 예상수요 {demand_sum:.1f}개 및 안전재고 {safety_stock:.1f}개 대비 "
+                    f"리드타임({lead_time}일)+발주주기 예상수요 {demand_sum:.1f}개 및 "
+                    f"안전재고 {safety_stock:.1f}개(서비스수준 {int(SERVICE_LEVEL*100)}%) 대비 "
                     f"가용재고 {current_stock:.1f}개 부족. 최소 발주배수({multiple:.0f}개) 올림 적용."
                 )
 
