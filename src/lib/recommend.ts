@@ -1,5 +1,6 @@
 import type { Category, Product, Supplier } from '../types';
 import { daysUntil } from './date';
+import { SERVICE_LEVEL, expectedDemand, peakWeekdays, safetyStock } from './forecast';
 
 export type StockStatus = 'out' | 'low' | 'ok';
 
@@ -14,6 +15,10 @@ export interface Analysis {
   stockDays: number | null; // 지금 재고로 버티는 일수 (판매 없는 상품은 null)
   status: StockStatus;
   urgent: boolean; // 납품 전에 품절될 수 있는 상태
+  forecastDemand: number; // 발주 커버 기간(리드타임+커버일) 예측 수요 합
+  safety: number; // 수학적 안전재고 = z·σ·√L
+  serviceLevel: number; // 안전재고 산출에 쓴 서비스수준
+  horizonDays: number; // 예측 커버 기간
   recommendPacks: number;
   recommendQty: number;
   reasons: string[];
@@ -52,19 +57,29 @@ export function analyze(p: Product, supplier: Supplier, today: Date): Analysis {
   const lead = supplier.leadTimeDays;
   const urgent = incomingQty === 0 && stockDays !== null && stockDays < lead;
 
-  const target = p.avgDailySales * (lead + COVER_DAYS[p.category]) + p.safetyStock;
+  // 고정 상수 대신 학습된 요일 계수로 기간 수요를 예측하고, 안전재고는 서비스수준으로 산출한다.
+  // 발주주기 '총수요'를 쓰므로(일별이 아니라) 무작위잡음이 상쇄돼 발주량 정확도가 높다.
+  // SystemEver 연동 시 expectedDemand 4번째 인자로 행사·가격 신호(DemandSignal)를 넘기면
+  // 포아송 잡음 바닥 아래로 정확도가 더 내려간다. (데모는 외부신호 없이 기본 1.0)
+  const horizonDays = lead + COVER_DAYS[p.category];
+  const forecastDemand = expectedDemand(p.avgDailySales, today, horizonDays);
+  const safety = safetyStock(p.avgDailySales, lead, SERVICE_LEVEL);
+  const target = forecastDemand + safety;
   const need = Math.ceil(target - usable - incomingQty);
   const recommendPacks = need > 0 ? Math.ceil(need / p.packSize) : 0;
   const lossQty = stock - usable;
+  const peaks = peakWeekdays(today, horizonDays);
 
   const reasons: string[] = [];
   if (recommendPacks > 0) {
     if (sellable <= 0) reasons.push('재고가 없어요');
     else if (urgent) reasons.push(`납품 전에 떨어질 수 있어요 (재고 약 ${stockDays}일치)`);
-    if (status === 'low' && sellable > 0) reasons.push(`안전재고(${p.safetyStock}${p.unit})보다 적어요`);
+    reasons.push(
+      `${horizonDays}일 예측수요 ${Math.round(forecastDemand)}${p.unit} + 안전재고 ${Math.ceil(safety)}${p.unit}(서비스수준 ${Math.round(SERVICE_LEVEL * 100)}%)`,
+    );
+    if (peaks.length > 0) reasons.push(`${peaks.join('·')}요일 수요 증가를 반영했어요`);
     if (lossQty > 0 && sellable > 0)
       reasons.push(`기한 내 못 팔 ${lossQty}${p.unit}을 빼고 계산했어요`);
-    if (reasons.length === 0) reasons.push(`앞으로 ${lead + COVER_DAYS[p.category]}일 판매량에 비해 부족해요`);
   }
 
   return {
@@ -78,6 +93,10 @@ export function analyze(p: Product, supplier: Supplier, today: Date): Analysis {
     stockDays,
     status,
     urgent,
+    forecastDemand,
+    safety,
+    serviceLevel: SERVICE_LEVEL,
+    horizonDays,
     recommendPacks,
     recommendQty: recommendPacks * p.packSize,
     reasons,
