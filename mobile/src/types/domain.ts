@@ -23,18 +23,18 @@ export interface SalesSummary {
   start: string; end: string; revenue: number; changePercent: number | null; grossProfit: number | null;
   trend: SalesTrend[]; categories: { name: string; revenue: number }[];
   ranking: { productId: string; name: string; category: string; quantity: number; revenue: number; grossProfit: number | null }[];
-  analysis: string; updatedAt: string;
+  analysis: string; updatedAt: string | null;
 }
 export interface DateRange { start: string; end: string }
 export interface ForecastResult { productId: string; expectedSales: number; period: string; reason: string }
 export interface PurchaseOrderItem {
-  productId: string; name: string; currentStock: number; expectedSales: number; leadDays: number;
-  recommended: number; quantity: number; unit: string; unitCost: number | null; reason: string; warning: string | null;
+  productId: string; name: string; currentStock: number | null; expectedSales: number | null; leadDays: number | null;
+  recommended: number | null; quantity: number; unit: string; unitCost: number | null; reason: string; warning: string | null;
 }
 export interface PurchaseOrder {
   id: string; supplier: string; status: OrderStatus; createdAt: string;
   items: PurchaseOrderItem[]; estimatedCost: number | null;
-  receipts: { date: string; name: string; quantity: number }[];
+  receipts: { date: string | null; name: string; quantity: number }[];
   allowedActions: ('save' | 'approve')[];
 }
 export interface ProductInput { name: string; barcode: string; category: string; unit: string; price: number }

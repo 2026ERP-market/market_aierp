@@ -31,7 +31,7 @@ export function RecommendationCard({ recommendation, onChanged }: { recommendati
     <Text style={ui.body}>{recommendation.reason}</Text>
     {recommendation.warning && <Notice>{recommendation.warning}</Notice>}
     <Button title="상품 재고 상세" secondary onPress={() => router.push({ pathname: '/products/[id]', params: { id: recommendation.productId } })} />
-    {recommendation.draftId ? <Button title={`발주서 검토 · ${recommendation.draftId}`} onPress={() => router.push({ pathname: '/purchase-orders/[id]', params: { id: recommendation.draftId! } })} /> : <Button title="추천으로 초안 작성" disabled={action.busy || !isMock} onPress={() => setConfirm(true)} />}
+    {recommendation.draftId ? <Button title={`발주서 검토 · ${recommendation.draftId}`} onPress={() => router.push({ pathname: '/purchase-orders/[id]', params: { id: recommendation.draftId! } })} /> : <Button title={isMock ? "추천으로 초안 작성" : "초안 생성 연동 준비 중"} disabled={action.busy || !isMock} onPress={() => setConfirm(true)} />}
     {action.message && <Notice error={action.failed}>{action.message}</Notice>}
     <ConfirmDialog visible={confirm} title="추천으로 데모 초안을 만들까요?" text={`${recommendation.productName} ${recommendation.quantity}${recommendation.unit}\n예상 금액 ${money(cost)}\n초안만 생성하며 실제 발주나 승인은 수행하지 않습니다.`} confirmLabel="데모 초안 생성" busy={action.busy} onCancel={() => setConfirm(false)} onConfirm={create} />
   </Card>;

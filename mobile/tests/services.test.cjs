@@ -11,6 +11,8 @@ const { createMockServices } = require('../src/services/mock/index.ts');
 const { createHttpClient } = require('../src/services/api/client.ts');
 const { estimatedCost } = require('../src/utils/replenishment.ts');
 const { resolvePlanningAction } = require('../src/features/agent/navigation.ts');
+const { createApiServices } = require('../src/services/api/services.ts');
+const apiFixtures = require('./api-fixtures.cjs');
 
 test('보충 계획은 동일한 고정 샘플이며 입고 예정과 과잉 위험을 별도로 제공한다', async () => {
   const first = await createMockServices().replenishment.get();
@@ -170,15 +172,97 @@ test('HTTP 요청 취소와 timeout을 구분한다', async () => {
     await assert.rejects(pending, { name: 'AbortError' });
   } finally { global.fetch = original }
 });
-test('live 모드에서 공식 명세가 없으면 네트워크 호출 없이 차단한다', async () => {
+test('API 모드의 주소 누락과 미지원 쓰기를 네트워크 호출 없이 차단한다', async () => {
   process.env.EXPO_PUBLIC_DATA_SOURCE = 'api';
   const original = global.fetch; global.fetch = () => { throw new Error('호출되면 안 됨') };
   try {
     const { services } = require('../src/services/index.ts');
-    await assert.rejects(services.dashboard.get(), { code: 'contract_pending' });
+    await assert.rejects(services.dashboard.get(), { code: 'validation' });
     await assert.rejects(services.purchases.approve('x'), { code: 'contract_pending' });
     const { replenishmentService } = require('../src/services/index.ts');
-    await assert.rejects(replenishmentService.get(), { code: 'contract_pending' });
+    await assert.rejects(replenishmentService.get(), { code: 'validation' });
     await assert.rejects(replenishmentService.createDraft('rec-milk'), { code: 'contract_pending' });
   } finally { global.fetch = original; delete process.env.EXPO_PUBLIC_DATA_SOURCE }
+});
+
+test('API 조회는 서버 필드를 변환하고 한 화면의 중복 조회를 공유한다', async () => {
+  const original = global.fetch; const calls = [];
+  global.fetch = async url => {
+    calls.push(url); const path = new URL(url).pathname;
+    const payload = { '/api/v1/inventory/current': apiFixtures.inventory, '/api/v1/dashboard/summary': apiFixtures.dashboard, '/api/v1/purchases/recommend': apiFixtures.recommendations, '/api/v1/purchases/orders': apiFixtures.orders }[path];
+    assert.ok(payload, path); return Response.json(payload);
+  };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' }); const signal = new AbortController().signal;
+    const [summary, stock, orders, plan] = await Promise.all([api.services.dashboard.get(signal), api.services.products.list(signal), api.services.purchases.list(signal), api.replenishment.get(signal)]);
+    assert.equal(summary.store.name, '서버 매장'); assert.equal(stock.products[0].id, 'p10');
+    assert.equal(stock.products[0].barcode, ''); assert.equal(stock.products[0].recentSales, null);
+    assert.equal(stock.updatedAt, '2026-10-24T01:30:00Z');
+    assert.equal(orders[0].items[0].name, '서버 우유'); assert.equal(orders[0].items[0].recommended, null);
+    assert.deepEqual(orders[0].allowedActions, []); assert.equal(orders[0].receipts[0].date, null);
+    assert.equal(plan.recommendations[0].quantity, 24); assert.equal(plan.budget, null);
+    assert.equal(plan.inventory[0].incomingQuantity, 30); assert.equal(plan.inventory[0].overstockRisk, null);
+    assert.equal(calls.filter(url => url.includes('/inventory/current')).length, 1);
+    assert.ok(calls.findIndex(url => url.includes('/dashboard/summary')) < calls.findIndex(url => url.includes('/purchases/recommend')));
+    await api.services.products.list(new AbortController().signal);
+    assert.equal(calls.filter(url => url.includes('/inventory/current')).length, 2);
+    await assert.rejects(api.services.products.get('missing'), { code: 'not_found' });
+  } finally { global.fetch = original }
+});
+
+test('API 실패·잘못된 데이터·빈 배열을 Mock 데이터로 대체하지 않는다', async () => {
+  const original = global.fetch; const api = createApiServices({ baseUrl: 'https://server.invalid' });
+  try {
+    global.fetch = async () => { throw new TypeError('offline') };
+    await assert.rejects(api.services.products.list(), { code: 'network' });
+    for (const status of [401, 403, 500]) {
+      global.fetch = async () => new Response('', { status });
+      await assert.rejects(api.services.products.list(), { code: status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : 'server' });
+    }
+    for (const payload of [{}, { products: [], updated_at: 'invalid' }, { ...apiFixtures.inventory, products: [{ ...apiFixtures.inventory.products[0], total_qty: '8' }] }]) {
+      global.fetch = async () => Response.json(payload);
+      await assert.rejects(api.services.products.list(), { code: 'invalid_response' });
+    }
+    global.fetch = async () => Response.json({ ...apiFixtures.inventory, products: [] });
+    assert.deepEqual((await api.services.products.list()).products, []);
+  } finally { global.fetch = original }
+});
+
+test('API 미지원 쓰기·타 매장 발주·잘못된 설정은 서버 요청 전에 차단한다', async () => {
+  const original = global.fetch; global.fetch = async () => { throw new Error('요청되면 안 됩니다') };
+  try {
+    const api = createApiServices({ baseUrl: 'https://server.invalid' });
+    await assert.rejects(api.services.products.save({}), { code: 'contract_pending' });
+    await assert.rejects(api.services.inventory.count({}), { code: 'contract_pending' });
+    await assert.rejects(api.services.purchases.save('PO-10', [10]), { code: 'contract_pending' });
+    await assert.rejects(api.services.purchases.approve('PO-10'), { code: 'contract_pending' });
+    await assert.rejects(api.replenishment.createDraft('REC-10'), { code: 'contract_pending' });
+    await assert.rejects(createApiServices({ baseUrl: 'https://server.invalid', warehouseId: 'OTHER' }).services.purchases.list(), { code: 'contract_pending' });
+    for (const baseUrl of ['', 'http://YOUR_DEV_SERVER:8000', 'https://user:password@server.invalid', 'file:///tmp']) {
+      await assert.rejects(createApiServices({ baseUrl }).services.products.list(), { code: 'validation' });
+    }
+  } finally { global.fetch = original }
+});
+
+test('API AI 질문은 POST로 전송하고 구조화 액션을 검증한다', async () => {
+  const original = global.fetch; const api = createApiServices({ baseUrl: 'https://server.invalid', tokenProvider: async () => 'test-token' });
+  const reply = { id: 'server-message', role: 'assistant', state: 'success', content: '서버 답변', cards: [{ title: '우유', text: '상세', action: { label: '재고', target: 'inventory', product_id: 'p10' } }] };
+  global.fetch = async (url, init) => { assert.match(url, /agent\/chat\?warehouse_id=WH-ASAN$/); assert.equal(init.method, 'POST'); assert.deepEqual(JSON.parse(init.body), { message: '재고 확인' }); assert.equal(init.headers.get('Authorization'), 'Bearer test-token'); return Response.json(reply) };
+  try {
+    const result = await api.services.agent.send(' 재고 확인 '); assert.equal(result.content, '서버 답변'); assert.deepEqual(resolvePlanningAction(result.cards[0].action), { kind: 'product', id: 'p10' });
+    reply.cards[0].action.target = 'https://evil.invalid'; await assert.rejects(api.services.agent.send('재고 확인'), { code: 'invalid_response' });
+  } finally { global.fetch = original }
+});
+
+test('API 판매 기간을 정확히 매핑하고 미지원 과거 기간·서버 기간 불일치를 거절한다', async () => {
+  const original = global.fetch; const api = createApiServices({ baseUrl: 'https://server.invalid' });
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const start = new Date(Date.parse(today) - 6 * 86400000).toISOString().slice(0, 10);
+  const payload = { start_date: start, end_date: today, total_revenue: 1000, trend: [], categories: [], ranking: [] };
+  global.fetch = async url => { assert.match(url, /summary\?days=6$/); return Response.json(payload) };
+  try {
+    const result = await api.services.sales.get({ start, end: today }); assert.equal(result.revenue, 1000); assert.equal(result.updatedAt, null);
+    payload.start_date = today; await assert.rejects(api.services.sales.get({ start, end: today }), { code: 'invalid_response' });
+    await assert.rejects(api.services.sales.get({ start: '2020-01-01', end: '2020-01-07' }), { code: 'contract_pending' });
+  } finally { global.fetch = original }
 });

@@ -27,7 +27,7 @@ export function PosHomeActions({ recommendationCount }: { recommendationCount?: 
   </Pressable>)}</View>;
 }
 
-export function PosWorkQueue({ pending, stockout, expiring }: { pending: number; stockout: number; expiring: number }) {
+export function PosWorkQueue({ pending, stockout, expiring }: { pending: number | null; stockout: number; expiring: number }) {
   const compact = useWindowDimensions().width < 360;
   const items = [
     { label: '승인 대기', count: pending, unit: '건', color: pos.blue, background: pos.blueSoft, onPress: () => router.push({ pathname: '/purchases', params: { view: 'approval' } }) },

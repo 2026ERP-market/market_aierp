@@ -6,7 +6,7 @@ export interface InventoryPlanning {
   incomingQuantity: number | null;
   salesPeriod: string;
   dailySales: { date: string; quantity: number }[];
-  overstockRisk: boolean;
+  overstockRisk: boolean | null;
   riskReason: string | null;
 }
 export interface PurchaseRecommendation {

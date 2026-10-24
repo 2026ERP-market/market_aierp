@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { Button, Chips, EmptyState, Field, ResourceState, Screen } from '../../components/common/ui';
 import { ProductListItem } from '../../components/cards';
 import { useResource } from '../../hooks/useResource';
-import { replenishmentService, services } from '../../services';
+import { isMock, replenishmentService, services } from '../../services';
 import { stockLabel } from '../../utils/format';
 export default function InventoryScreen() {
   const params = useLocalSearchParams<{ status?: string }>();
@@ -21,7 +21,7 @@ export default function InventoryScreen() {
     <Chips selected={selectedStatus} onSelect={value => { setStatus(value); router.setParams({ status: '' }) }} values={[{ label: '전체 상태', value: 'all' }, { label: '! 부족·품절', value: 'risk' }, { label: '! 과잉 위험', value: 'overstock' }, ...Object.entries(stockLabel).map(([value, label]) => ({ value, label }))]} />
     <ResourceState {...query} hasData={!!query.data} retry={query.reload} />
     {filtered.map(product => <ProductListItem key={product.id} product={product} planning={query.data?.planning.find(item => item.productId === product.id)} />)}
-    {!query.loading && !query.error && !filtered.length && <EmptyState text="검색어나 필터를 바꾸거나 상품을 등록해 주세요." />}
+    {!query.loading && !query.error && !filtered.length && <EmptyState text={!isMock && selectedStatus === "overstock" ? "과잉 위험 판정은 서버에서 아직 제공하지 않습니다." : "검색어나 필터를 바꾸거나 상품을 등록해 주세요."} />}
     <Button title="보조 화면 · 판매 데이터 참고" secondary onPress={() => router.push('/sales')} />
   </Screen>;
 }

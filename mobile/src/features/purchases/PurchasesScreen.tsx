@@ -4,7 +4,7 @@ import { Chips, EmptyState, Notice, ResourceState, Screen } from '../../componen
 import { PurchaseOrderCard } from '../../components/cards';
 import { BudgetCard, RecommendationCard } from '../../components/cards/ReplenishmentCards';
 import { useResource } from '../../hooks/useResource';
-import { replenishmentService, services } from '../../services';
+import { isMock, replenishmentService, services } from '../../services';
 import { orderLabel } from '../../utils/format';
 import { estimatedCost } from '../../utils/replenishment';
 export default function PurchasesScreen() {
@@ -30,7 +30,7 @@ export default function PurchasesScreen() {
       {!query.loading && !query.error && !filteredRecommendations.length && <EmptyState text="해당 조건의 발주 추천이 없습니다." />}
     </> : <>
       {filtered.map(order => <PurchaseOrderCard key={order.id} order={order} />)}
-      {!query.loading && !query.error && !filtered.length && <EmptyState text="해당 조건의 발주서가 없습니다." />}
+      {!query.loading && !query.error && !filtered.length && <EmptyState text={!isMock && selectedView === "approval" ? "승인 대기 판정은 서버 계약 협의 후 연결합니다. 발주·입고 내역을 이용해 주세요." : "해당 조건의 발주서가 없습니다."} />}
     </>}
   </Screen>;
 }
