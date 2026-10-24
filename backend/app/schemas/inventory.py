@@ -21,7 +21,7 @@ class InventoryProductDTO(BaseModel):
     category: str
     unit: str
     price: int
-    cost_price: int
+    cost_price: int | None = None
     pack_size: float
     total_qty: float
     available_qty: float
@@ -31,6 +31,7 @@ class InventoryProductDTO(BaseModel):
     supplier_name: str | None = None
     batches: list[BatchDTO] = []
     incoming_qty: float = 0.0
+    overstock_risk: bool = False
 
 class InventorySummaryResponse(BaseModel):
     products: list[InventoryProductDTO]

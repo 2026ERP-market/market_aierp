@@ -7,6 +7,7 @@ class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
 
     po_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    warehouse_id: Mapped[str] = mapped_column(String(30), ForeignKey("warehouses.warehouse_id"), default="WH-ASAN", nullable=False)
     supplier_id: Mapped[str] = mapped_column(String(30), ForeignKey("suppliers.supplier_id"), nullable=False)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     expected_date: Mapped[date] = mapped_column(Date, nullable=False)
