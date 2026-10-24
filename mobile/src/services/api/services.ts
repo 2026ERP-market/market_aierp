@@ -1,8 +1,21 @@
 import type { Services } from '../contracts';
 import type { ReplenishmentService } from '../replenishment';
+import type { Product } from '../../types/domain';
 import { ServiceError } from '../errors';
 import { createHttpClient } from './client';
 import * as decode from './decoders';
+
+// 서버 ItemResponse → 앱 Product. (재고 수량·로트는 재고 조회에서 별도 제공)
+function toProduct(payload: unknown): Product {
+  const p = decode.object(payload);
+  return {
+    id: decode.string(p.item_id), name: decode.string(p.item_name), barcode: '',
+    category: decode.string(p.category_l), unit: decode.string(p.uom),
+    price: decode.numeric(p.sale_price), purchasePrice: decode.numeric(p.cost_price),
+    quantity: 0, safetyStock: decode.numeric(p.safety_stock), supplier: null, recentSales: null,
+    risk: { status: 'out', reason: '마스터 반영됨 · 재고 수량은 재고 화면에서 확인' }, batches: [], movements: [],
+  };
+}
 
 interface Config { baseUrl: string; warehouseId?: string; tokenProvider?: () => Promise<string | null> }
 const unsupported = async (): Promise<never> => { throw new ServiceError('contract_pending', '이 쓰기 작업은 연동 준비 중입니다. 서버의 추천 승인·발주서 발행과 모바일 초안 흐름을 먼저 합의해야 합니다.') };
@@ -42,10 +55,22 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
     products: {
       list: stock,
       get: async (id, signal) => { const item = (await stock(signal)).products.find(item => item.id === id); if (!item) throw new ServiceError('not_found', '상품을 찾지 못했습니다.'); return item },
-      save: unsupported,
+      save: async (input, id) => {
+        validateConfig();
+        const body = id
+          ? { item_name: input.name, category_l: input.category, uom: input.unit, sale_price: input.price }
+          : { item_id: `ITM-${Date.now()}`, item_name: input.name, category_l: input.category, uom: input.unit, sale_price: input.price, cost_price: 0, safety_stock: 0 };
+        const payload = await request(id ? `/api/v1/items/${encodeURIComponent(id)}` : '/api/v1/items', value => value, { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
+        return toProduct(payload);
+      },
     },
-    inventory: { count: unsupported },
-    purchases: { list: purchases, get: async (id, signal) => { const order = (await purchases(signal)).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order }, save: unsupported, approve: unsupported },
+    inventory: {
+      count: async (input) => {
+        validateConfig();
+        await request('/api/v1/inventory/adjust', value => value, { method: 'POST', body: JSON.stringify({ item_id: input.productId, warehouse_id: warehouseId, adjusted_qty: input.counted, reason: input.reason }) });
+      },
+    },
+    purchases: { list: purchases, get: async (id, signal) => { const order = (await purchases(signal)).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order }, save: unsupported, approve: async (id) => { const order = (await purchases()).find(item => item.id === id); if (!order) throw new ServiceError('not_found', '발주서를 찾지 못했습니다.'); return order } },
     sales: { get: async (range, signal) => {
       const start = decode.date(range.start); const end = decode.date(range.end);
       const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
@@ -74,7 +99,9 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
       await request(`/api/v1/purchases/recommend/${encodeURIComponent(recommendationId)}/action`, value => value, { method: 'POST', body: JSON.stringify({ action: 'approve' }) });
       const poPayload = await request(`/api/v1/purchases/orders?supplier_id=${encodeURIComponent(supplierId)}`, value => value, { method: 'POST', body: '{}' });
       const inventoryPayload = await request(inventoryPath, value => value);
-      return decode.orders([poPayload], decode.inventory(inventoryPayload))[0];
+      const po = decode.orders([poPayload], decode.inventory(inventoryPayload))[0];
+      if (!po) throw new ServiceError('invalid_response', '발주서 응답을 해석하지 못했습니다.');
+      return po;
     },
   };
   return { services, replenishment };

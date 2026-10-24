@@ -46,6 +46,6 @@ export default function AgentScreen() {
     {!!retry && !action.busy && <Button title="이 질문 다시 시도" secondary onPress={() => send(retry, true)} />}
     <Card><Field label="재고·발주 질문" value={input} onChangeText={setInput} placeholder="예: 내일 우유를 몇 개 발주하면 좋을까?" multiline maxLength={2000} editable={!action.busy} /><Button title={action.busy ? '응답 생성 중…' : '질문 보내기'} disabled={action.busy || !input.trim() || !!retry} onPress={() => send(input.trim())} />{retry && !action.busy ? <Button title="실패한 질문 취소" secondary onPress={() => setRetry('')} /> : null}</Card>
     <ConfirmDialog visible={!!draftRequest} title="추천으로 데모 초안을 만들까요?" text="AI 카드의 상품과 추천 근거를 확인해 주세요. 초안만 생성하며 실제 발주·승인·입고는 수행하지 않습니다." confirmLabel="데모 초안 생성" busy={action.busy} onCancel={() => setDraftRequest(undefined)} onConfirm={createDraft} />
-    {!isMock && <Notice>실제 AI 에이전트 연결과 초안 생성 API는 연동 준비 중입니다.</Notice>}
+    {!isMock && <Notice>실제 AI 에이전트(서버 LLM)에 연결되어 ERP 데이터로 응답합니다.</Notice>}
   </Screen>;
 }

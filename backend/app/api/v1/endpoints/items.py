@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.models.master import Item
-from app.schemas.master import ItemResponse, ItemCreate
+from app.schemas.master import ItemResponse, ItemCreate, ItemUpdate
 
 router = APIRouter(prefix="/items", tags=["Items"])
 
@@ -49,4 +49,20 @@ async def get_item(
     item = await db.get(Item, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+@router.put("/{item_id}", response_model=ItemResponse)
+async def update_item(
+    item_id: str,
+    item_in: ItemUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """품목 마스터 수정 (보낸 필드만 반영)"""
+    item = await db.get(Item, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    for field, value in item_in.model_dump(exclude_unset=True).items():
+        setattr(item, field, value)
+    await db.commit()
+    await db.refresh(item)
     return item

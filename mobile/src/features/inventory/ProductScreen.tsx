@@ -32,7 +32,7 @@ export default function ProductScreen() {
       <SalesQuantityTrend planning={planning} unit={product.unit} />
       <Card title="✦ 재고 위험 분석"><Text style={ui.body}>{product.risk.reason}</Text></Card>
       {query.data?.recommendations.map(recommendation => <RecommendationCard key={recommendation.id} recommendation={recommendation} onChanged={query.reload} />)}
-      <Card title="재고 실사 기록"><Notice>입력한 실사 수량은 현재 재고를 직접 덮어쓰지 않습니다. 실제 반영은 서버의 재고 조정 업무 규칙이 필요해요.</Notice><Field label={`실사 수량 (${product.unit})`} value={counted} onChangeText={setCounted} keyboardType="number-pad" /><Field label="실사 사유" value={reason} onChangeText={setReason} multiline />{action.message && <Notice error={action.failed}>{action.message}</Notice>}<Button title={action.busy ? '접수 중…' : isMock ? '데모 실사 접수' : '실사 접수'} disabled={action.busy || !isMock || !counted || !reason.trim()} onPress={count} /></Card>
+      <Card title="재고 실사 기록"><Notice>{isMock ? '입력한 실사 수량은 현재 재고를 직접 덮어쓰지 않습니다.' : '실사 수량으로 서버 재고가 조정됩니다(대표 로트 기준).'}</Notice><Field label={`실사 수량 (${product.unit})`} value={counted} onChangeText={setCounted} keyboardType="number-pad" /><Field label="실사 사유" value={reason} onChangeText={setReason} multiline />{action.message && <Notice error={action.failed}>{action.message}</Notice>}<Button title={action.busy ? '접수 중…' : isMock ? '데모 실사 접수' : '실사 접수'} disabled={action.busy || !counted || !reason.trim()} onPress={count} /></Card>
     </>}
   </Screen>;
 }

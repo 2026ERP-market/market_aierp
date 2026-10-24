@@ -25,7 +25,7 @@ interface Props {
 
 export function PosOrderPanel({ product, order, recommendation, quantities, dirty, busy, loading, message, failed, onEdit, onSave, onCreateDraft, onClear }: Props) {
   const editable = !!order?.allowedActions.includes('save') && isMock && !busy && !loading;
-  const disabled = !product || busy || loading || (dirty && !editable) || (!order && (!recommendation || !isMock));
+  const disabled = !product || busy || loading || (dirty && !editable) || (!order && !recommendation);
   const amount = order ? estimatedCost(order.items.map((item, index) => ({ unitCost: item.unitCost, quantity: /^\d+$/.test(quantities[index] ?? '') ? Number(quantities[index]) : NaN }))) : recommendation ? estimatedCost([{ unitCost: recommendation.unitCost, quantity: recommendation.quantity }]) : null;
   function review() { if (order) router.push({ pathname: '/purchase-orders/[id]', params: { id: order.id } }) }
   return <>
@@ -74,7 +74,7 @@ export function PosOrderPanel({ product, order, recommendation, quantities, dirt
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="발주서 상세 검토" disabled={!order || dirty || busy || loading} onPress={review} style={[c.subtleButton, (!order || dirty || busy || loading) && { opacity: 0.4 }]}><Text style={c.subtleText}>상세</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={order ? dirty ? '수정한 초안 저장' : '발주서 검토' : '초안 만들기'} accessibilityState={{ disabled }} disabled={disabled} onPress={order ? dirty ? onSave : review : onCreateDraft} style={[c.primary, disabled && { opacity: 0.4 }]}>
-          <Text style={c.primaryLabel}>{busy ? '처리 중…' : order ? dirty ? '초안 저장' : '발주서 검토' : (isMock ? '초안 만들기' : '초안 연동 준비 중')}</Text><Text style={c.primaryValue}>{money(amount)}</Text>
+          <Text style={c.primaryLabel}>{busy ? '처리 중…' : order ? dirty ? '초안 저장' : '발주서 검토' : (isMock ? '초안 만들기' : '발주서 발행')}</Text><Text style={c.primaryValue}>{money(amount)}</Text>
         </Pressable>
       </View>
     </View>
