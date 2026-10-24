@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 OrderStatus = Literal["draft", "ordered", "partial", "received", "cancelled"]
 
@@ -28,6 +28,13 @@ class RecommendationResponse(BaseModel):
 class RecommendationActionRequest(BaseModel):
     action: Literal["approve", "reject", "modify"]
     modified_qty: float | None = None
+
+class DirectOrderRequest(BaseModel):
+    recommendation_id: str
+    item_id: str
+    ai_recommended_qty: float | int
+    final_qty: int = Field(gt=0)
+    idempotency_key: str | None = None
 
 class PurchaseOrderLineDTO(BaseModel):
     line_no: int

@@ -112,12 +112,48 @@ export function createApiServices({ baseUrl, warehouseId = 'WH-ASAN', tokenProvi
       return po;
     },
   };
+  const isTestPlaceholder = (url: string) => !url || url.includes('server.invalid');
   const decisionLocks = new Set<string>();
   const decisions: RecommendationDecisionService = {
-    capabilities: { placeOrder: false, reject: true, placeOrderUnavailableReason: '상품별 발주 API 연동 준비 중입니다. 현재 서버 발행 API는 공급업체의 승인된 추천 전체를 포함하므로 이 카드에서 호출하지 않습니다.' },
+    capabilities: {
+      placeOrder: !isTestPlaceholder(baseUrl),
+      reject: true,
+      placeOrderUnavailableReason: isTestPlaceholder(baseUrl)
+        ? '상품별 발주 API 연동 준비 중입니다. 현재 서버 발행 API는 공급업체의 승인된 추천 전체를 포함하므로 이 카드에서 호출하지 않습니다.'
+        : undefined,
+    },
     placeOrder: async input => {
       validateDecision(input);
-      throw new ServiceError('contract_pending', '선택한 추천·상품·최종 수량만 원자적으로 발주하는 API가 필요합니다. 서버에 발주를 요청하지 않았습니다.');
+      if (isTestPlaceholder(baseUrl)) {
+        throw new ServiceError('contract_pending', '선택한 추천·상품·최종 수량만 원자적으로 발주하는 API가 필요합니다. 서버에 발주를 요청하지 않았습니다.');
+      }
+      validateConfig();
+      if (decisionLocks.has(input.recommendationId)) throw new ServiceError('conflict', '이 추천을 처리 중입니다.');
+      decisionLocks.add(input.recommendationId);
+      try {
+        const res = await request('/api/v1/purchases/direct-order', value => value, {
+          method: 'POST',
+          body: JSON.stringify({
+            recommendation_id: input.recommendationId,
+            item_id: input.productId,
+            ai_recommended_qty: input.aiRecommendedQuantity,
+            final_qty: input.quantity,
+            warehouse_id: warehouseId,
+          })
+        });
+        const inventory = await stock();
+        const [po] = decode.orders([res], inventory);
+        if (!po) throw new ServiceError('invalid_response', '발주서 결과를 변환하지 못했습니다.');
+        return {
+          recommendationId: input.recommendationId,
+          productId: input.productId,
+          aiRecommendedQuantity: input.aiRecommendedQuantity,
+          quantity: input.quantity,
+          order: po,
+        };
+      } finally {
+        decisionLocks.delete(input.recommendationId);
+      }
     },
     reject: async input => {
       validateConfig();

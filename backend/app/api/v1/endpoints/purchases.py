@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.core.database import get_db
 from app.models.purchases import PurchaseOrder, PurchaseOrderLine, OrderRecommendation
 from app.models.master import Supplier
 from app.schemas.purchases import (
+    DirectOrderRequest,
     RecommendationResponse, RecommendationActionRequest,
     PurchaseOrderResponse, PurchaseOrderLineDTO, ReceiveOrderRequest
 )
@@ -109,3 +110,27 @@ async def receive_purchase_order(
         return await ReplenishmentService.receive_purchase_order(db, po_id, req.received_items)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/direct-order", response_model=PurchaseOrderResponse, status_code=status.HTTP_201_CREATED)
+async def create_direct_order(
+    req: DirectOrderRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    모바일 AI 추천에서 직접 발주:
+    선택한 추천 1건에 대해 입력 수량으로 즉시 발주서(ordered)를 발행하고 추천 상태를 ordered로 변경.
+    """
+    try:
+        return await ReplenishmentService.create_direct_order(
+            db=db,
+            recommendation_id=req.recommendation_id,
+            item_id=req.item_id,
+            ai_recommended_qty=float(req.ai_recommended_qty),
+            final_qty=float(req.final_qty),
+            warehouse_id=getattr(req, "warehouse_id", "WH-ASAN")
+        )
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))

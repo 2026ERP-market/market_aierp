@@ -306,3 +306,87 @@ class ReplenishmentService:
 
         await db.commit()
         return {"status": "success", "po_id": po_id, "new_status": "received"}
+
+
+    @staticmethod
+    async def create_direct_order(
+        db: AsyncSession,
+        recommendation_id: str,
+        item_id: str,
+        ai_recommended_qty: float,
+        final_qty: float,
+        warehouse_id: str = "WH-ASAN"
+    ) -> PurchaseOrderResponse:
+        stmt = (
+            select(OrderRecommendation, Item, Supplier)
+            .join(Item, OrderRecommendation.item_id == Item.item_id)
+            .join(Supplier, OrderRecommendation.supplier_id == Supplier.supplier_id)
+            .where(
+                OrderRecommendation.rec_id == recommendation_id,
+                OrderRecommendation.item_id == item_id,
+                OrderRecommendation.warehouse_id == warehouse_id
+            )
+        )
+        res = await db.execute(stmt)
+        row = res.first()
+        if not row:
+            raise KeyError(f"해당 추천 건을 찾을 수 없습니다: {recommendation_id}")
+
+        rec, item, supplier = row
+        if rec.status in ["ordered", "rejected"]:
+            raise ValueError(f"이미 {rec.status} 처리된 추천입니다.")
+
+        today = date.today()
+        lead_time = supplier.lead_time_days if supplier else 2
+        expected_date = today + timedelta(days=lead_time)
+
+        cost = int(item.cost_price or item.price or 0)
+        total_amount = int(final_qty * cost)
+
+        po_id = f"PO-{today.strftime('%y%m%d')}-{supplier.supplier_id[-4:]}-{datetime.now().strftime('%H%M%S')}"
+        po = PurchaseOrder(
+            po_id=po_id,
+            supplier_id=supplier.supplier_id,
+            order_date=today,
+            expected_date=expected_date,
+            total_amount=total_amount,
+            status="ordered",
+            created_at=datetime.utcnow()
+        )
+        db.add(po)
+
+        line = PurchaseOrderLine(
+            po_id=po_id,
+            line_no=1,
+            item_id=item.item_id,
+            order_qty=float(final_qty),
+            received_qty=0.0,
+            unit_cost=cost
+        )
+        db.add(line)
+
+        rec.status = "ordered"
+        await db.commit()
+        await db.refresh(po)
+
+        line_dto = PurchaseOrderLineDTO(
+            line_no=1,
+            item_id=item.item_id,
+            item_name=item.item_name,
+            order_qty=float(final_qty),
+            received_qty=0.0,
+            unit_cost=cost,
+            amount=total_amount
+        )
+        return PurchaseOrderResponse(
+            po_id=po.po_id,
+            supplier_id=supplier.supplier_id,
+            supplier_name=supplier.supplier_name,
+            order_date=po.order_date,
+            expected_date=po.expected_date,
+            received_date=None,
+            total_amount=total_amount,
+            status="ordered",
+            lines=[line_dto],
+            created_at=po.created_at
+        )
